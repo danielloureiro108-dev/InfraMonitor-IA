@@ -1,0 +1,28 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#818CF8" />
+      <stop offset="100%" stop-color="#4338CA" />
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="15" fill="url(#bg)" />
+
+  <!-- halos de sinal nos dois nós monitorados -->
+  <circle cx="10" cy="34" r="7" fill="#FFFFFF" opacity="0.16" />
+  <circle cx="54" cy="34" r="7" fill="#FFFFFF" opacity="0.16" />
+
+  <!-- linha de pulso conectando os dois pontos monitorados -->
+  <path
+    d="M 10,34 L 18,34 L 23,19 L 29,47 L 35,25 L 39,34 L 54,34"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="4.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- nós (endpoints monitorados) -->
+  <circle cx="10" cy="34" r="3.4" fill="#FFFFFF" />
+  <circle cx="54" cy="34" r="3.4" fill="#FFFFFF" />
+</svg>

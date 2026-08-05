@@ -1,0 +1,13 @@
+{
+  "backendUrl": "http://SEU-SERVIDOR:4000",
+  "agentToken": "cole-aqui-o-mesmo-valor-de-AGENT_TOKEN-do-.env-do-backend",
+  "intervaloPadraoSegundos": 60,
+  "netflow": {
+    "ativo": false,
+    "porta": 2055
+  },
+  "syslog": {
+    "ativo": false,
+    "porta": 1514
+  }
+}

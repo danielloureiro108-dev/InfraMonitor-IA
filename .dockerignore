@@ -1,0 +1,10 @@
+.git
+.gitignore
+.dockerignore
+README.md
+.env*
+!.env.example
+*.log
+.DS_Store
+node_modules
+dist

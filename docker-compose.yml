@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: inframonitor-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-inframonitor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inframonitor}
+      POSTGRES_DB: ${POSTGRES_DB:-inframonitor}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-inframonitor}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: inframonitor-backend
+    restart: unless-stopped
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgres://${POSTGRES_USER:-inframonitor}:${POSTGRES_PASSWORD:-inframonitor}@db:5432/${POSTGRES_DB:-inframonitor}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      SNMP_ENCRYPTION_KEY: ${SNMP_ENCRYPTION_KEY:-change-me-32-chars-min-in-env!!}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      MONITOR_TICK_SECONDS: ${MONITOR_TICK_SECONDS:-15}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      API_URL: ${API_URL:-http://localhost:4000}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-common}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AGENT_TOKEN: ${AGENT_TOKEN:-}
+    ports:
+      - "4000:4000"
+      - "2055:2055/udp"
+      - "1514:1514/udp"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - inframonitor
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
+    container_name: inframonitor-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - inframonitor
+
+volumes:
+  db_data:
+    driver: local
+
+networks:
+  inframonitor:
+    driver: bridge

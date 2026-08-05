@@ -1,0 +1,40 @@
+export type StatusEquipamento = "online" | "offline" | "instavel" | "desconhecido";
+
+export interface Equipamento {
+  id: string;
+  nome: string;
+  descricao?: string;
+  empresa_id?: string;
+  unidade_id?: string;
+  departamento_id?: string;
+  categoria_id?: string;
+  localizacao?: string;
+  responsavel?: string;
+  fabricante?: string;
+  modelo?: string;
+  tipo?: string;
+  sistema_operacional?: string;
+  hostname?: string;
+  ip: string;
+  mascara?: string;
+  gateway?: string;
+  dns?: string;
+  mac_address?: string;
+  numero_serie?: string;
+  patrimonio?: string;
+  rustdesk_id?: string;
+  snmp_version?: string;
+  snmp_community_enc?: string;
+  snmp_username?: string;
+  snmp_password_enc?: string;
+  snmp_auth_protocol?: string;
+  snmp_privacy_protocol?: string;
+  intervalo_monitoramento: number;
+  timeout_ms: number;
+  tentativas: number;
+  observacoes?: string;
+  status: StatusEquipamento;
+  ativo: boolean;
+  criado_em: string;
+  atualizado_em: string;
+}
