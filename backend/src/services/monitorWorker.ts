@@ -1,6 +1,6 @@
 import { query } from "../db";
 import { executarPing, calcularJitter } from "./pingService";
-import { consultarSnmp, consultarInterfacesSnmp } from "./snmpService";
+import { consultarSnmp, consultarInterfacesSnmp, consultarOids } from "./snmpService";
 import { dispararAlerta, resolverAlerta } from "./alertEngine";
 import { transmitir } from "./wsServer";
 import { Equipamento } from "../types";
@@ -143,6 +143,32 @@ async function monitorarEquipamento(equipamento: Equipamento) {
                VALUES ($1,$2,$3,$4,$5,$6)`,
               [equipamento.id, iface.ifIndex, iface.ifDescr, iface.ifSpeed, iface.inOctets, iface.outOctets]
             )
+          )
+        );
+      }
+
+      // ---- OIDs customizados monitorados manualmente neste equipamento ----
+      const { rows: oidsMonitorados } = await query<{ oid: string }>(
+        `SELECT oid FROM equipamento_oids_monitorados WHERE equipamento_id = $1`,
+        [equipamento.id]
+      );
+      if (oidsMonitorados.length > 0) {
+        const valores = await consultarOids(
+          {
+            host: equipamento.ip,
+            version: equipamento.snmp_version,
+            communityEnc: equipamento.snmp_community_enc,
+            username: equipamento.snmp_username,
+            passwordEnc: equipamento.snmp_password_enc,
+            authProtocol: equipamento.snmp_auth_protocol,
+            privProtocol: equipamento.snmp_privacy_protocol,
+            timeoutMs: equipamento.timeout_ms,
+          },
+          oidsMonitorados.map((o) => o.oid)
+        );
+        await Promise.all(
+          Object.entries(valores).map(([oid, valor]) =>
+            query(`INSERT INTO historico_oids_snmp (equipamento_id, oid, valor) VALUES ($1,$2,$3)`, [equipamento.id, oid, valor])
           )
         );
       }

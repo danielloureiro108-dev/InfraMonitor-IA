@@ -2,7 +2,8 @@ import dgram from "dgram";
 import { query } from "../db";
 import { mapearAplicacao } from "../utils/portas";
 
-let socket: dgram.Socket | null = null;
+// Um socket UDP por porta distinta em uso (cada equipamento pode configurar sua própria porta).
+const sockets = new Map<number, dgram.Socket>();
 
 const REGEX_IP = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
 const REGEX_SRC = /\bSRC=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/i;
@@ -51,51 +52,58 @@ export function extrairFluxoDeSyslog(mensagem: string): FluxoExtraido | null {
   return null;
 }
 
-export function iniciarColetorSyslog(porta: number) {
-  pararColetorSyslog();
+async function processarMensagem(msg: Buffer, rinfo: dgram.RemoteInfo) {
+  try {
+    const mensagem = msg.toString("utf8").trim();
+    if (!mensagem) return;
 
-  socket = dgram.createSocket("udp4");
+    await query(`INSERT INTO logs_syslog (ip_origem, mensagem) VALUES ($1, $2)`, [rinfo.address, mensagem]);
 
-  socket.on("message", async (msg, rinfo) => {
-    try {
-      const mensagem = msg.toString("utf8").trim();
-      if (!mensagem) return;
-
-      await query(`INSERT INTO logs_syslog (ip_origem, mensagem) VALUES ($1, $2)`, [rinfo.address, mensagem]);
-
-      const fluxo = extrairFluxoDeSyslog(mensagem);
-      if (fluxo) {
-        const { rows: equipamentoRows } = await query(`SELECT id FROM equipamentos WHERE ip = $1 LIMIT 1`, [rinfo.address]);
-        await query(
-          `INSERT INTO trafego_flows (origem_tipo, equipamento_id, ip_exportador, ip_origem, ip_destino, porta_origem, porta_destino, protocolo, aplicacao, bytes, pacotes)
-           VALUES ('syslog', $1, $2, $3, $4, $5, $6, $7, $8, $9, 1)`,
-          [
-            equipamentoRows[0]?.id || null, rinfo.address, fluxo.ipOrigem, fluxo.ipDestino,
-            fluxo.portaOrigem, fluxo.portaDestino, fluxo.protocolo, mapearAplicacao(fluxo.portaDestino), fluxo.bytes,
-          ]
-        );
-      }
-    } catch (e) {
-      console.error("[syslog] erro ao processar mensagem:", e);
+    const fluxo = extrairFluxoDeSyslog(mensagem);
+    if (fluxo) {
+      const { rows: equipamentoRows } = await query(`SELECT id FROM equipamentos WHERE ip = $1 LIMIT 1`, [rinfo.address]);
+      await query(
+        `INSERT INTO trafego_flows (origem_tipo, equipamento_id, ip_exportador, ip_origem, ip_destino, porta_origem, porta_destino, protocolo, aplicacao, bytes, pacotes)
+         VALUES ('syslog', $1, $2, $3, $4, $5, $6, $7, $8, $9, 1)`,
+        [
+          equipamentoRows[0]?.id || null, rinfo.address, fluxo.ipOrigem, fluxo.ipDestino,
+          fluxo.portaOrigem, fluxo.portaDestino, fluxo.protocolo, mapearAplicacao(fluxo.portaDestino), fluxo.bytes,
+        ]
+      );
     }
-  });
-
-  socket.on("error", (err) => {
-    console.error(`[syslog] erro no socket UDP:`, err);
-  });
-
-  socket.bind(porta, () => {
-    console.log(`[syslog] coletor Syslog ouvindo em UDP:${porta}`);
-  });
-}
-
-export function pararColetorSyslog() {
-  if (socket) {
-    socket.close();
-    socket = null;
+  } catch (e) {
+    console.error("[syslog] erro ao processar mensagem:", e);
   }
 }
 
+function abrirListener(porta: number) {
+  const socket = dgram.createSocket("udp4");
+  socket.on("message", processarMensagem);
+  socket.on("error", (err) => console.error(`[syslog] erro no socket UDP:${porta}:`, err));
+  socket.bind(porta, () => console.log(`[syslog] coletor Syslog ouvindo em UDP:${porta}`));
+  sockets.set(porta, socket);
+}
+
+/** Ajusta os listeners ativos para exatamente o conjunto de portas desejado (abre os que faltam, fecha os que sobram). */
+export function sincronizarColetorSyslog(portasDesejadas: number[]) {
+  const desejado = new Set(portasDesejadas);
+
+  for (const [porta, socket] of sockets) {
+    if (!desejado.has(porta)) {
+      socket.close();
+      sockets.delete(porta);
+    }
+  }
+  for (const porta of desejado) {
+    if (!sockets.has(porta)) abrirListener(porta);
+  }
+}
+
+export function pararColetorSyslog() {
+  for (const socket of sockets.values()) socket.close();
+  sockets.clear();
+}
+
 export function statusColetorSyslog() {
-  return { ativo: socket !== null };
+  return { ativo: sockets.size > 0, portas: [...sockets.keys()] };
 }

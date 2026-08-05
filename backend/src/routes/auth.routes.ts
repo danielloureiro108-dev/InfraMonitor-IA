@@ -141,6 +141,53 @@ authRouter.delete("/usuarios/:id", requireAuth, requireRole("administrador"), as
   }
 });
 
+// Escopo de dados do usuário: quais clientes/unidades ele pode visualizar.
+// Sem nenhum vínculo, o usuário não é restrito (continua vendo tudo).
+authRouter.get("/usuarios/:id/escopo", requireAuth, requireRole("administrador"), async (req, res, next) => {
+  try {
+    const [{ rows: empresas }, { rows: unidades }] = await Promise.all([
+      query<{ empresa_id: string }>(`SELECT empresa_id FROM usuario_clientes_permitidos WHERE usuario_id = $1`, [req.params.id]),
+      query<{ unidade_id: string }>(`SELECT unidade_id FROM usuario_unidades_permitidas WHERE usuario_id = $1`, [req.params.id]),
+    ]);
+    res.json({ empresa_ids: empresas.map((e) => e.empresa_id), unidade_ids: unidades.map((u) => u.unidade_id) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const escopoSchema = z.object({
+  empresa_ids: z.array(z.string().uuid()).default([]),
+  unidade_ids: z.array(z.string().uuid()).default([]),
+});
+
+authRouter.put("/usuarios/:id/escopo", requireAuth, requireRole("administrador"), async (req: AuthRequest, res, next) => {
+  try {
+    const dados = escopoSchema.parse(req.body);
+    const { rows: existe } = await query(`SELECT id FROM usuarios WHERE id = $1`, [req.params.id]);
+    if (!existe[0]) return res.status(404).json({ erro: "Usuário não encontrado" });
+
+    await query(`DELETE FROM usuario_clientes_permitidos WHERE usuario_id = $1`, [req.params.id]);
+    await query(`DELETE FROM usuario_unidades_permitidas WHERE usuario_id = $1`, [req.params.id]);
+    if (dados.empresa_ids.length > 0) {
+      await query(
+        `INSERT INTO usuario_clientes_permitidos (usuario_id, empresa_id) SELECT $1, unnest($2::uuid[])`,
+        [req.params.id, dados.empresa_ids]
+      );
+    }
+    if (dados.unidade_ids.length > 0) {
+      await query(
+        `INSERT INTO usuario_unidades_permitidas (usuario_id, unidade_id) SELECT $1, unnest($2::uuid[])`,
+        [req.params.id, dados.unidade_ids]
+      );
+    }
+
+    await registrarLog(req.user!.sub, "alteracao", "usuario_escopo", req.params.id, dados);
+    res.json(dados);
+  } catch (e) {
+    next(e);
+  }
+});
+
 authRouter.get("/me", requireAuth, (req: AuthRequest, res) => {
   res.json(req.user);
 });

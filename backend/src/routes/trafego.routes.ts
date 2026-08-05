@@ -1,11 +1,9 @@
 import { Router } from "express";
-import { z } from "zod";
 import { query } from "../db";
-import { requireAuth, requireRole, AuthRequest } from "../middleware/auth";
-import { iniciarColetorNetflow, pararColetorNetflow, statusColetorNetflow } from "../services/netflowCollector";
-import { iniciarColetorSyslog, pararColetorSyslog, statusColetorSyslog } from "../services/syslogCollector";
+import { requireAuth } from "../middleware/auth";
+import { sincronizarColetorNetflow, statusColetorNetflow } from "../services/netflowCollector";
+import { sincronizarColetorSyslog, statusColetorSyslog } from "../services/syslogCollector";
 import { gerarInsights, EstatisticasTrafego } from "../services/insightsService";
-import { registrarLog } from "../bootstrap";
 
 export const trafegoRouter = Router();
 
@@ -20,62 +18,24 @@ function resolverPeriodo(periodo?: string) {
   return PERIODOS[periodo || "24h"] || PERIODOS["24h"];
 }
 
-/** Inicializa os coletores conforme a configuração salva no banco — chamado uma vez na subida do servidor. */
-export async function inicializarColetoresTrafego() {
-  const { rows } = await query(`SELECT chave, valor FROM configuracoes WHERE chave IN ('netflow', 'syslog')`);
-  const config = Object.fromEntries(rows.map((r: any) => [r.chave, r.valor]));
-  if (config.netflow?.ativo) iniciarColetorNetflow(config.netflow.porta || 2055);
-  if (config.syslog?.ativo) iniciarColetorSyslog(config.syslog.porta || 1514);
+/**
+ * Ajusta os coletores NetFlow/Syslog para escutar exatamente nas portas que os
+ * equipamentos ativos têm configuradas (ativação e porta são por equipamento,
+ * não mais um único coletor global). Chamado na subida do servidor e sempre
+ * que um equipamento é criado/editado/excluído.
+ */
+export async function sincronizarColetoresTrafego() {
+  const { rows } = await query<{ netflow_ativo: boolean; netflow_porta: number | null; syslog_ativo: boolean; syslog_porta: number | null }>(
+    `SELECT netflow_ativo, netflow_porta, syslog_ativo, syslog_porta FROM equipamentos WHERE ativo = true`
+  );
+  const portasNetflow = [...new Set(rows.filter((r) => r.netflow_ativo && r.netflow_porta).map((r) => r.netflow_porta!))];
+  const portasSyslog = [...new Set(rows.filter((r) => r.syslog_ativo && r.syslog_porta).map((r) => r.syslog_porta!))];
+  sincronizarColetorNetflow(portasNetflow);
+  sincronizarColetorSyslog(portasSyslog);
 }
 
-trafegoRouter.get("/config", requireAuth, async (_req, res, next) => {
-  try {
-    const { rows } = await query(`SELECT chave, valor FROM configuracoes WHERE chave IN ('netflow', 'syslog')`);
-    const config: any = Object.fromEntries(rows.map((r: any) => [r.chave, r.valor]));
-    res.json({
-      netflow: { ...config.netflow, rodando: statusColetorNetflow().ativo },
-      syslog: { ...config.syslog, rodando: statusColetorSyslog().ativo },
-    });
-  } catch (e) {
-    next(e);
-  }
-});
-
-const configSchema = z.object({
-  netflow: z.object({ ativo: z.boolean(), porta: z.number().int().min(1).max(65535) }).optional(),
-  syslog: z.object({ ativo: z.boolean(), porta: z.number().int().min(1).max(65535) }).optional(),
-});
-
-trafegoRouter.put("/config", requireAuth, requireRole("administrador", "operador"), async (req: AuthRequest, res, next) => {
-  try {
-    const dados = configSchema.parse(req.body);
-
-    if (dados.netflow) {
-      await query(
-        `INSERT INTO configuracoes (chave, valor) VALUES ('netflow', $1) ON CONFLICT (chave) DO UPDATE SET valor = $1, atualizado_em = now()`,
-        [JSON.stringify(dados.netflow)]
-      );
-      if (dados.netflow.ativo) iniciarColetorNetflow(dados.netflow.porta);
-      else pararColetorNetflow();
-    }
-
-    if (dados.syslog) {
-      await query(
-        `INSERT INTO configuracoes (chave, valor) VALUES ('syslog', $1) ON CONFLICT (chave) DO UPDATE SET valor = $1, atualizado_em = now()`,
-        [JSON.stringify(dados.syslog)]
-      );
-      if (dados.syslog.ativo) iniciarColetorSyslog(dados.syslog.porta);
-      else pararColetorSyslog();
-    }
-
-    await registrarLog(req.user!.sub, "alteracao", "configuracoes", undefined, { modulo: "trafego", ...dados });
-    res.json({
-      netflow: statusColetorNetflow(),
-      syslog: statusColetorSyslog(),
-    });
-  } catch (e) {
-    next(e);
-  }
+trafegoRouter.get("/coletores/status", requireAuth, (_req, res) => {
+  res.json({ netflow: statusColetorNetflow(), syslog: statusColetorSyslog() });
 });
 
 async function coletarEstatisticas(periodo: string): Promise<EstatisticasTrafego> {

@@ -37,6 +37,10 @@ export interface Equipamento {
   observacoes?: string;
   status: StatusEquipamento;
   ativo: boolean;
+  netflow_ativo: boolean;
+  netflow_porta?: number | null;
+  syslog_ativo: boolean;
+  syslog_porta?: number | null;
   criado_em: string;
   atualizado_em: string;
 }

@@ -2,7 +2,8 @@ import dgram from "dgram";
 import { query } from "../db";
 import { mapearAplicacao, nomeProtocoloIp } from "../utils/portas";
 
-let socket: dgram.Socket | null = null;
+// Um socket UDP por porta distinta em uso (cada equipamento pode configurar sua própria porta).
+const sockets = new Map<number, dgram.Socket>();
 
 function intParaIp(valor: number): string {
   return [(valor >>> 24) & 255, (valor >>> 16) & 255, (valor >>> 8) & 255, valor & 255].join(".");
@@ -53,53 +54,60 @@ export function parsearNetflowV5(buffer: Buffer): FlowV5[] {
   return flows;
 }
 
-export function iniciarColetorNetflow(porta: number) {
-  pararColetorNetflow();
+async function processarPacote(msg: Buffer, rinfo: dgram.RemoteInfo) {
+  try {
+    const flows = parsearNetflowV5(msg);
+    if (flows.length === 0) return;
 
-  socket = dgram.createSocket("udp4");
+    // Tenta casar o exportador (quem enviou o pacote) com um equipamento cadastrado
+    const { rows: equipamentoRows } = await query(`SELECT id FROM equipamentos WHERE ip = $1 LIMIT 1`, [rinfo.address]);
+    const equipamentoId = equipamentoRows[0]?.id || null;
 
-  socket.on("message", async (msg, rinfo) => {
-    try {
-      const flows = parsearNetflowV5(msg);
-      if (flows.length === 0) return;
-
-      // Tenta casar o exportador (quem enviou o pacote) com um equipamento cadastrado
-      const { rows: equipamentoRows } = await query(`SELECT id FROM equipamentos WHERE ip = $1 LIMIT 1`, [rinfo.address]);
-      const equipamentoId = equipamentoRows[0]?.id || null;
-
-      await Promise.all(
-        flows.map((f) =>
-          query(
-            `INSERT INTO trafego_flows (origem_tipo, equipamento_id, ip_exportador, ip_origem, ip_destino, porta_origem, porta_destino, protocolo, aplicacao, bytes, pacotes)
-             VALUES ('netflow', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-            [
-              equipamentoId, rinfo.address, f.ipOrigem, f.ipDestino, f.portaOrigem, f.portaDestino,
-              f.protocolo, mapearAplicacao(f.portaDestino), f.bytes, f.pacotes,
-            ]
-          )
+    await Promise.all(
+      flows.map((f) =>
+        query(
+          `INSERT INTO trafego_flows (origem_tipo, equipamento_id, ip_exportador, ip_origem, ip_destino, porta_origem, porta_destino, protocolo, aplicacao, bytes, pacotes)
+           VALUES ('netflow', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            equipamentoId, rinfo.address, f.ipOrigem, f.ipDestino, f.portaOrigem, f.portaDestino,
+            f.protocolo, mapearAplicacao(f.portaDestino), f.bytes, f.pacotes,
+          ]
         )
-      );
-    } catch (e) {
-      console.error("[netflow] erro ao processar pacote:", e);
-    }
-  });
-
-  socket.on("error", (err) => {
-    console.error(`[netflow] erro no socket UDP:`, err);
-  });
-
-  socket.bind(porta, () => {
-    console.log(`[netflow] coletor NetFlow v5 ouvindo em UDP:${porta}`);
-  });
-}
-
-export function pararColetorNetflow() {
-  if (socket) {
-    socket.close();
-    socket = null;
+      )
+    );
+  } catch (e) {
+    console.error("[netflow] erro ao processar pacote:", e);
   }
 }
 
+function abrirListener(porta: number) {
+  const socket = dgram.createSocket("udp4");
+  socket.on("message", processarPacote);
+  socket.on("error", (err) => console.error(`[netflow] erro no socket UDP:${porta}:`, err));
+  socket.bind(porta, () => console.log(`[netflow] coletor NetFlow v5 ouvindo em UDP:${porta}`));
+  sockets.set(porta, socket);
+}
+
+/** Ajusta os listeners ativos para exatamente o conjunto de portas desejado (abre os que faltam, fecha os que sobram). */
+export function sincronizarColetorNetflow(portasDesejadas: number[]) {
+  const desejado = new Set(portasDesejadas);
+
+  for (const [porta, socket] of sockets) {
+    if (!desejado.has(porta)) {
+      socket.close();
+      sockets.delete(porta);
+    }
+  }
+  for (const porta of desejado) {
+    if (!sockets.has(porta)) abrirListener(porta);
+  }
+}
+
+export function pararColetorNetflow() {
+  for (const socket of sockets.values()) socket.close();
+  sockets.clear();
+}
+
 export function statusColetorNetflow() {
-  return { ativo: socket !== null };
+  return { ativo: sockets.size > 0, portas: [...sockets.keys()] };
 }

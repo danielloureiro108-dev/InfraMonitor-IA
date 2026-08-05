@@ -2,10 +2,11 @@ import { Router } from "express";
 import { query } from "../db";
 import { requireAuth, requirePermissao, AuthRequest } from "../middleware/auth";
 import { registrarLog } from "../bootstrap";
+import { carregarEscopo, condicaoEscopo } from "../utils/escopo";
 
 export const alertasRouter = Router();
 
-alertasRouter.get("/", requireAuth, async (req, res, next) => {
+alertasRouter.get("/", requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const { status, empresa_id, inicio, fim } = req.query as Record<string, string>;
     const condicoes: string[] = [];
@@ -14,6 +15,9 @@ alertasRouter.get("/", requireAuth, async (req, res, next) => {
     if (empresa_id) { valores.push(empresa_id); condicoes.push(`e.empresa_id = $${valores.length}`); }
     if (inicio) { valores.push(inicio); condicoes.push(`a.criado_em >= $${valores.length}`); }
     if (fim) { valores.push(fim); condicoes.push(`a.criado_em <= $${valores.length}`); }
+    const escopo = await carregarEscopo(req.user!.sub, req.user!.perfil);
+    const condEscopo = condicaoEscopo(escopo, valores, "e.empresa_id", "e.unidade_id");
+    if (condEscopo) condicoes.push(condEscopo);
     const where = condicoes.length ? `WHERE ${condicoes.join(" AND ")}` : "";
 
     const { rows } = await query(

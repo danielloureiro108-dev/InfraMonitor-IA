@@ -1,14 +1,21 @@
 import { Router } from "express";
 import { query } from "../db";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, AuthRequest } from "../middleware/auth";
+import { carregarEscopo, condicaoEscopo } from "../utils/escopo";
 
 export const dashboardRouter = Router();
 
-dashboardRouter.get("/resumo", requireAuth, async (req, res, next) => {
+dashboardRouter.get("/resumo", requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const { empresa_id } = req.query as Record<string, string>;
-    const filtroEmpresa = empresa_id ? `AND empresa_id = $1` : "";
-    const paramsEquip = empresa_id ? [empresa_id] : [];
+    const escopo = await carregarEscopo(req.user!.sub, req.user!.perfil);
+
+    const paramsEquip: any[] = [];
+    const condicoesEquip: string[] = [];
+    if (empresa_id) { paramsEquip.push(empresa_id); condicoesEquip.push(`empresa_id = $${paramsEquip.length}`); }
+    const condEscopoEquip = condicaoEscopo(escopo, paramsEquip, "empresa_id", "unidade_id");
+    if (condEscopoEquip) condicoesEquip.push(condEscopoEquip);
+    const filtroEmpresa = condicoesEquip.length ? `AND ${condicoesEquip.join(" AND ")}` : "";
 
     const { rows: contagem } = await query(
       `SELECT
@@ -21,41 +28,51 @@ dashboardRouter.get("/resumo", requireAuth, async (req, res, next) => {
       paramsEquip
     );
 
-    const filtroEmpresaAlertas = empresa_id ? `AND e.empresa_id = $1` : "";
+    const paramsAlertas: any[] = [];
+    const condicoesAlertas: string[] = [];
+    if (empresa_id) { paramsAlertas.push(empresa_id); condicoesAlertas.push(`e.empresa_id = $${paramsAlertas.length}`); }
+    const condEscopoAlertas = condicaoEscopo(escopo, paramsAlertas, "e.empresa_id", "e.unidade_id");
+    if (condEscopoAlertas) condicoesAlertas.push(condEscopoAlertas);
+    const filtroEmpresaAlertas = condicoesAlertas.length ? `AND ${condicoesAlertas.join(" AND ")}` : "";
     const { rows: alertasAbertos } = await query(
       `SELECT COUNT(*)::int AS total FROM alertas a JOIN equipamentos e ON e.id = a.equipamento_id
        WHERE a.status = 'aberto' ${filtroEmpresaAlertas}`,
-      paramsEquip
+      paramsAlertas
     );
 
-    const filtroEmpresaHist = empresa_id ? `AND e.empresa_id = $1` : "";
+    const paramsHist: any[] = [];
+    const condicoesHist: string[] = [];
+    if (empresa_id) { paramsHist.push(empresa_id); condicoesHist.push(`e.empresa_id = $${paramsHist.length}`); }
+    const condEscopoHist = condicaoEscopo(escopo, paramsHist, "e.empresa_id", "e.unidade_id");
+    if (condEscopoHist) condicoesHist.push(condEscopoHist);
+    const filtroEmpresaHist = condicoesHist.length ? `AND ${condicoesHist.join(" AND ")}` : "";
 
     const { rows: latencia } = await query(
       `SELECT AVG(h.tempo_ms)::numeric(10,2) AS media
        FROM historico_ping h JOIN equipamentos e ON e.id = h.equipamento_id
        WHERE h.executado_em > now() - interval '1 hour' AND h.online = true ${filtroEmpresaHist}`,
-      paramsEquip
+      paramsHist
     );
 
     const { rows: disponibilidade24h } = await query(
       `SELECT (COUNT(*) FILTER (WHERE h.online = true))::numeric / GREATEST(COUNT(*), 1) * 100 AS pct
        FROM historico_ping h JOIN equipamentos e ON e.id = h.equipamento_id
        WHERE h.executado_em > now() - interval '24 hours' ${filtroEmpresaHist}`,
-      paramsEquip
+      paramsHist
     );
 
     const { rows: disponibilidade7d } = await query(
       `SELECT (COUNT(*) FILTER (WHERE h.online = true))::numeric / GREATEST(COUNT(*), 1) * 100 AS pct
        FROM historico_ping h JOIN equipamentos e ON e.id = h.equipamento_id
        WHERE h.executado_em > now() - interval '7 days' ${filtroEmpresaHist}`,
-      paramsEquip
+      paramsHist
     );
 
     const { rows: ultimaAtualizacao } = await query(
       `SELECT MAX(h.executado_em) AS quando
        FROM historico_ping h JOIN equipamentos e ON e.id = h.equipamento_id
        WHERE 1=1 ${filtroEmpresaHist}`,
-      paramsEquip
+      paramsHist
     );
 
     res.json({
@@ -75,7 +92,7 @@ dashboardRouter.get("/resumo", requireAuth, async (req, res, next) => {
   }
 });
 
-dashboardRouter.get("/disponibilidade-serie", requireAuth, async (req, res, next) => {
+dashboardRouter.get("/disponibilidade-serie", requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const { empresa_id, inicio, fim } = req.query as Record<string, string>;
     const periodoSql = req.query.periodo === "7d" ? "7 days" : "24 hours";
@@ -84,6 +101,9 @@ dashboardRouter.get("/disponibilidade-serie", requireAuth, async (req, res, next
     const valores: any[] = [];
 
     if (empresa_id) { valores.push(empresa_id); condicoes.push(`e.empresa_id = $${valores.length}`); }
+    const escopo = await carregarEscopo(req.user!.sub, req.user!.perfil);
+    const condEscopo = condicaoEscopo(escopo, valores, "e.empresa_id", "e.unidade_id");
+    if (condEscopo) condicoes.push(condEscopo);
 
     if (inicio && fim) {
       valores.push(inicio); condicoes.push(`h.executado_em >= $${valores.length}`);
@@ -109,12 +129,15 @@ dashboardRouter.get("/disponibilidade-serie", requireAuth, async (req, res, next
   }
 });
 
-dashboardRouter.get("/offline-por-categoria", requireAuth, async (req, res, next) => {
+dashboardRouter.get("/offline-por-categoria", requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const { empresa_id } = req.query as Record<string, string>;
     const condicoes = ["e.status = 'offline'", "e.ativo = true"];
     const valores: any[] = [];
     if (empresa_id) { valores.push(empresa_id); condicoes.push(`e.empresa_id = $${valores.length}`); }
+    const escopo = await carregarEscopo(req.user!.sub, req.user!.perfil);
+    const condEscopo = condicaoEscopo(escopo, valores, "e.empresa_id", "e.unidade_id");
+    if (condEscopo) condicoes.push(condEscopo);
 
     const { rows } = await query(
       `SELECT COALESCE(c.nome, 'Sem categoria') AS categoria, COUNT(*)::int AS total

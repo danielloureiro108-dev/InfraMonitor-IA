@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard, Server, Map, History, BellRing, ScanSearch, Settings, Waves, FileText,
+  LayoutDashboard, Server, Map, History, BellRing, ScanSearch, Settings, FileText,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -8,7 +8,6 @@ const ITENS = [
   { to: "/", label: "Dashboard", icone: LayoutDashboard, fim: true },
   { to: "/equipamentos", label: "Equipamentos", icone: Server },
   { to: "/mapa", label: "Mapa", icone: Map },
-  { to: "/trafego", label: "Tráfego", icone: Waves },
   { to: "/historico", label: "Histórico", icone: History },
   { to: "/alertas", label: "Alertas", icone: BellRing },
   { to: "/relatorios", label: "Relatórios", icone: FileText },
