@@ -1,15 +1,21 @@
 import { Router } from "express";
 import { query } from "../db";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, AuthRequest } from "../middleware/auth";
+import { carregarEscopo, empresaNoEscopo } from "../utils/escopo";
 
 export const relatoriosRouter = Router();
 
 // Estatísticas de disponibilidade por equipamento, para montar o relatório de
 // disponibilidade em PDF. Sem inicio/fim, considera os últimos 30 dias.
-relatoriosRouter.get("/disponibilidade", requireAuth, async (req, res, next) => {
+relatoriosRouter.get("/disponibilidade", requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const { empresa_id, inicio, fim } = req.query as Record<string, string>;
     if (!empresa_id) return res.status(400).json({ erro: "Informe empresa_id" });
+
+    const escopo = await carregarEscopo(req.user!.sub, req.user!.perfil);
+    if (!empresaNoEscopo(escopo, empresa_id)) {
+      return res.status(403).json({ erro: "Você não tem acesso aos dados deste cliente" });
+    }
 
     const condicoesHist: string[] = ["h.equipamento_id = e.id"];
     const valores: any[] = [empresa_id];

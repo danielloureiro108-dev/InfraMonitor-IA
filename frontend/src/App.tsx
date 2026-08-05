@@ -9,7 +9,6 @@ import Equipamentos from "./pages/Equipamentos";
 import EquipamentoForm from "./pages/EquipamentoForm";
 import EquipamentoDetalhe from "./pages/EquipamentoDetalhe";
 import Mapa from "./pages/Mapa";
-import Trafego from "./pages/Trafego";
 import Historico from "./pages/Historico";
 import Alertas from "./pages/Alertas";
 import Relatorios from "./pages/Relatorios";
@@ -35,7 +34,6 @@ export default function App() {
       <Route path="/equipamentos/:id/editar" element={<RotaProtegida><EquipamentoForm /></RotaProtegida>} />
       <Route path="/equipamentos/:id" element={<RotaProtegida><EquipamentoDetalhe /></RotaProtegida>} />
       <Route path="/mapa" element={<RotaProtegida><Mapa /></RotaProtegida>} />
-      <Route path="/trafego" element={<RotaProtegida><Trafego /></RotaProtegida>} />
       <Route path="/historico" element={<RotaProtegida><Historico /></RotaProtegida>} />
       <Route path="/alertas" element={<RotaProtegida><Alertas /></RotaProtegida>} />
       <Route path="/relatorios" element={<RotaProtegida><Relatorios /></RotaProtegida>} />

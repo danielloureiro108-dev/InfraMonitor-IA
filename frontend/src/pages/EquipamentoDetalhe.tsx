@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Plus, Minus, Radar, Loader2 } from "lucide-react";
 import { api } from "../lib/api";
 import { AppLayout } from "../components/layout/AppLayout";
 import { Card } from "../components/ui/Card";
 import { StatusBadge } from "../components/ui/StatusBadge";
-import { Equipamento, FluxoTrafego } from "../types";
+import { Equipamento, FluxoTrafego, OidMonitorado, OidEncontrado } from "../types";
 
 interface PingRegistro {
   online: boolean;
@@ -91,6 +91,7 @@ export default function EquipamentoDetalhe() {
       </Card>
 
       {equipamento.tipo_monitoramento === "snmp" && <TrafegoInterfaceCard equipamentoId={equipamento.id} />}
+      {equipamento.tipo_monitoramento === "snmp" && <OidsMonitoradosCard equipamentoId={equipamento.id} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <Card>
@@ -158,27 +159,37 @@ const PERIODOS = [
 
 function TrafegoInterfaceCard({ equipamentoId }: { equipamentoId: string }) {
   const [interfaces, setInterfaces] = useState<InterfaceItem[]>([]);
-  const [ifIndex, setIfIndex] = useState<string>("");
+  const [selecionadas, setSelecionadas] = useState<string[]>([]);
   const [periodo, setPeriodo] = useState("24h");
   const [serie, setSerie] = useState<PontoTrafego[]>([]);
   const [carregando, setCarregando] = useState(true);
+  const [mostrarSeletor, setMostrarSeletor] = useState(false);
 
   useEffect(() => {
     api.get<InterfaceItem[]>(`/historico/interfaces/lista?equipamento_id=${equipamentoId}`).then((lista) => {
       setInterfaces(lista);
-      if (lista.length > 0) setIfIndex(String(lista[0].if_index));
+      if (lista.length > 0) setSelecionadas([String(lista[0].if_index)]);
       setCarregando(false);
     });
   }, [equipamentoId]);
 
   useEffect(() => {
-    if (!ifIndex) return;
+    if (selecionadas.length === 0) { setSerie([]); return; }
+    const query = selecionadas.map((i) => `if_index=${i}`).join("&");
     api
-      .get<PontoTrafego[]>(`/historico/interfaces/trafego?equipamento_id=${equipamentoId}&if_index=${ifIndex}&periodo=${periodo}`)
+      .get<PontoTrafego[]>(`/historico/interfaces/trafego?equipamento_id=${equipamentoId}&${query}&periodo=${periodo}`)
       .then(setSerie);
-  }, [equipamentoId, ifIndex, periodo]);
+  }, [equipamentoId, selecionadas, periodo]);
 
-  const interfaceAtual = interfaces.find((i) => String(i.if_index) === ifIndex);
+  function alternarInterface(ifIndex: string) {
+    setSelecionadas((atual) =>
+      atual.includes(ifIndex) ? atual.filter((i) => i !== ifIndex) : [...atual, ifIndex]
+    );
+  }
+
+  const capacidadeTotal = interfaces
+    .filter((i) => selecionadas.includes(String(i.if_index)) && i.if_speed)
+    .reduce((soma, i) => soma + (i.if_speed || 0), 0);
 
   return (
     <Card className="mb-4">
@@ -186,9 +197,25 @@ function TrafegoInterfaceCard({ equipamentoId }: { equipamentoId: string }) {
         <h3 className="text-sm font-medium text-foreground">Tráfego de Rede (SNMP) — Download / Upload</h3>
         {interfaces.length > 0 && (
           <div className="flex items-center gap-2">
-            <select className="input max-w-[220px] !py-1.5 text-xs" value={ifIndex} onChange={(e) => setIfIndex(e.target.value)}>
-              {interfaces.map((i) => <option key={i.if_index} value={i.if_index}>{i.if_descr || `Interface ${i.if_index}`}</option>)}
-            </select>
+            <div className="relative">
+              <button type="button" className="btn-secondary !py-1.5 text-xs" onClick={() => setMostrarSeletor((v) => !v)}>
+                {selecionadas.length === 0 ? "Selecionar interfaces…" : `${selecionadas.length} interface${selecionadas.length > 1 ? "s" : ""} selecionada${selecionadas.length > 1 ? "s" : ""}`}
+              </button>
+              {mostrarSeletor && (
+                <div className="absolute right-0 z-10 mt-1 w-64 bg-surface-raised border border-surface-border rounded-lg shadow-lg p-2 max-h-64 overflow-y-auto">
+                  {interfaces.map((i) => (
+                    <label key={i.if_index} className="flex items-center gap-2 text-xs text-foreground px-2 py-1.5 rounded hover:bg-foreground/5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selecionadas.includes(String(i.if_index))}
+                        onChange={() => alternarInterface(String(i.if_index))}
+                      />
+                      {i.if_descr || `Interface ${i.if_index}`}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
             <select className="input max-w-[130px] !py-1.5 text-xs" value={periodo} onChange={(e) => setPeriodo(e.target.value)}>
               {PERIODOS.map((p) => <option key={p.valor} value={p.valor}>{p.rotulo}</option>)}
             </select>
@@ -202,6 +229,8 @@ function TrafegoInterfaceCard({ equipamentoId }: { equipamentoId: string }) {
         <p className="text-xs text-foreground-subtle">
           Nenhuma interface SNMP coletada ainda para este equipamento. Isso aparece automaticamente assim que houver ao menos duas coletas SNMP (o cálculo de banda precisa de dois pontos para medir a variação).
         </p>
+      ) : selecionadas.length === 0 ? (
+        <p className="text-xs text-foreground-subtle">Selecione ao menos uma interface para ver o gráfico.</p>
       ) : (
         <>
           <ResponsiveContainer width="100%" height={240}>
@@ -230,8 +259,8 @@ function TrafegoInterfaceCard({ equipamentoId }: { equipamentoId: string }) {
               <Area type="monotone" dataKey="upload_mbps" name="Upload" stroke="#22C55E" fill="url(#corUpload)" strokeWidth={2} connectNulls={false} />
             </AreaChart>
           </ResponsiveContainer>
-          {interfaceAtual?.if_speed && (
-            <p className="text-xs text-foreground-subtle mt-2">Capacidade nominal da interface: {(interfaceAtual.if_speed / 1_000_000).toFixed(0)} Mbps</p>
+          {capacidadeTotal > 0 && (
+            <p className="text-xs text-foreground-subtle mt-2">Capacidade nominal somada das interfaces selecionadas: {(capacidadeTotal / 1_000_000).toFixed(0)} Mbps</p>
           )}
         </>
       )}
@@ -275,7 +304,7 @@ function TrafegoFlowsCard({ equipamentoId }: { equipamentoId: string }) {
         <p className="text-xs text-foreground-subtle">Carregando…</p>
       ) : fluxos.length === 0 ? (
         <p className="text-xs text-foreground-subtle">
-          Nenhum fluxo NetFlow ou Syslog registrado para este equipamento no período. Ative os coletores em Configurações → Tráfego e confirme que o equipamento está enviando dados para este servidor.
+          Nenhum fluxo NetFlow ou Syslog registrado para este equipamento no período. Ative o NetFlow e/ou o Syslog no cadastro deste equipamento e confirme que ele está enviando dados para a porta configurada.
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -307,6 +336,154 @@ function TrafegoFlowsCard({ equipamentoId }: { equipamentoId: string }) {
           </table>
         </div>
       )}
+    </Card>
+  );
+}
+
+function OidsMonitoradosCard({ equipamentoId }: { equipamentoId: string }) {
+  const [oids, setOids] = useState<OidMonitorado[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [novoOid, setNovoOid] = useState("");
+  const [novoRotulo, setNovoRotulo] = useState("");
+  const [erro, setErro] = useState<string | null>(null);
+
+  const [walking, setWalking] = useState(false);
+  const [resultadoWalk, setResultadoWalk] = useState<OidEncontrado[] | null>(null);
+  const [erroWalk, setErroWalk] = useState<string | null>(null);
+
+  async function carregar() {
+    setOids(await api.get<OidMonitorado[]>(`/equipamentos/${equipamentoId}/oids`));
+    setCarregando(false);
+  }
+
+  useEffect(() => { carregar(); }, [equipamentoId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function adicionar(oid: string, rotulo?: string) {
+    setErro(null);
+    try {
+      await api.post(`/equipamentos/${equipamentoId}/oids`, { oid, rotulo: rotulo || undefined });
+      carregar();
+    } catch (e: any) {
+      setErro(e.message || "Não foi possível adicionar o OID");
+    }
+  }
+
+  async function adicionarManual(e: FormEvent) {
+    e.preventDefault();
+    if (!novoOid.trim()) return;
+    await adicionar(novoOid.trim(), novoRotulo.trim());
+    setNovoOid("");
+    setNovoRotulo("");
+  }
+
+  async function remover(oidMonitorado: OidMonitorado) {
+    setErro(null);
+    try {
+      await api.delete(`/equipamentos/${equipamentoId}/oids/${oidMonitorado.id}`);
+      carregar();
+    } catch (e: any) {
+      setErro(e.message || "Não foi possível remover o OID");
+    }
+  }
+
+  async function testarSnmpwalk() {
+    setErroWalk(null);
+    setWalking(true);
+    setResultadoWalk(null);
+    try {
+      setResultadoWalk(await api.post<OidEncontrado[]>(`/equipamentos/${equipamentoId}/snmpwalk`, {}));
+    } catch (e: any) {
+      setErroWalk(e.message || "Falha ao executar o SNMPwalk");
+    } finally {
+      setWalking(false);
+    }
+  }
+
+  const oidsJaMonitorados = new Set(oids.map((o) => o.oid));
+
+  return (
+    <Card className="mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-1">
+        <h3 className="text-sm font-medium text-foreground">Monitoramento SNMP avançado (OIDs customizados)</h3>
+        <button type="button" className="btn-secondary !py-1.5 text-xs" onClick={testarSnmpwalk} disabled={walking}>
+          {walking ? <Loader2 size={14} className="animate-spin" /> : <Radar size={14} />}
+          {walking ? "Consultando…" : "Testar SNMPwalk"}
+        </button>
+      </div>
+      <p className="text-xs text-foreground-subtle mb-4">
+        Adicione OIDs específicos para coletar junto com o monitoramento SNMP padrão deste equipamento. Use o SNMPwalk para descobrir o que o dispositivo expõe, ou informe um OID manualmente.
+      </p>
+
+      {erroWalk && <p className="text-xs text-red-400 mb-3">{erroWalk}</p>}
+      {resultadoWalk && (
+        <div className="mb-4 border border-surface-border rounded-lg max-h-56 overflow-y-auto">
+          {resultadoWalk.length === 0 ? (
+            <p className="text-xs text-foreground-subtle p-3">O SNMPwalk não retornou nenhum OID.</p>
+          ) : (
+            <table className="w-full text-xs">
+              <tbody>
+                {resultadoWalk.map((r) => (
+                  <tr key={r.oid} className="border-b border-surface-border/50 last:border-0">
+                    <td className="py-1.5 pl-3 pr-2 font-mono text-foreground-subtle whitespace-nowrap">{r.oid}</td>
+                    <td className="py-1.5 pr-2 text-foreground-subtle whitespace-nowrap">{r.tipo}</td>
+                    <td className="py-1.5 pr-2 text-foreground truncate max-w-[220px]" title={r.valor}>{r.valor}</td>
+                    <td className="py-1.5 pr-3 text-right">
+                      {oidsJaMonitorados.has(r.oid) ? (
+                        <span className="text-foreground-subtle">monitorado</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-foreground-subtle hover:text-brand"
+                          title="Adicionar aos monitorados"
+                          onClick={() => adicionar(r.oid)}
+                        >
+                          <Plus size={14} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      <h4 className="text-xs font-semibold text-foreground-muted uppercase tracking-wide mb-2">OIDs monitorados</h4>
+      {carregando ? (
+        <p className="text-xs text-foreground-subtle">Carregando…</p>
+      ) : (
+        <ul className="space-y-1.5 mb-3 max-h-56 overflow-y-auto">
+          {oids.map((o) => (
+            <li key={o.id} className="flex items-center justify-between text-xs bg-surface rounded-lg px-3 py-2 gap-2">
+              <div className="min-w-0">
+                <span className="font-mono text-foreground">{o.oid}</span>
+                {o.rotulo && <span className="text-foreground-subtle ml-2">{o.rotulo}</span>}
+                <div className="text-foreground-subtle mt-0.5">
+                  {o.ultimo_valor != null ? (
+                    <>Último valor: <span className="text-foreground">{o.ultimo_valor}</span> ({o.ultima_leitura_em && new Date(o.ultima_leitura_em).toLocaleString("pt-BR")})</>
+                  ) : (
+                    "Ainda sem leitura"
+                  )}
+                </div>
+              </div>
+              <button type="button" className="text-foreground-subtle hover:text-red-400 shrink-0" title="Remover" onClick={() => remover(o)}>
+                <Minus size={14} />
+              </button>
+            </li>
+          ))}
+          {oids.length === 0 && <p className="text-xs text-foreground-subtle">Nenhum OID customizado monitorado ainda.</p>}
+        </ul>
+      )}
+
+      <form onSubmit={adicionarManual} className="flex gap-2">
+        <input className="input font-mono text-xs" placeholder="OID (ex: 1.3.6.1.2.1.1.5.0)" value={novoOid} onChange={(e) => setNovoOid(e.target.value)} />
+        <input className="input text-xs" placeholder="Rótulo (opcional)" value={novoRotulo} onChange={(e) => setNovoRotulo(e.target.value)} />
+        <button className="btn-secondary shrink-0 !py-1.5 text-xs" type="submit">
+          <Plus size={14} /> Adicionar
+        </button>
+      </form>
+      {erro && <p className="text-xs text-red-400 mt-2">{erro}</p>}
     </Card>
   );
 }

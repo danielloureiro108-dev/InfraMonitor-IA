@@ -15,6 +15,8 @@ const VAZIO = {
   snmp_auth_protocol: "", snmp_privacy_protocol: "",
   intervalo_monitoramento: 60, timeout_ms: 2000, tentativas: 3,
   observacoes: "", ativo: true,
+  netflow_ativo: false, netflow_porta: 2055,
+  syslog_ativo: false, syslog_porta: 1514,
 };
 
 export default function EquipamentoForm() {
@@ -129,6 +131,47 @@ export default function EquipamentoForm() {
             <Campo label="DNS" value={dados.dns} onChange={(v) => campo("dns", v)} />
             <Campo label="MAC Address" value={dados.mac_address} onChange={(v) => campo("mac_address", v)} />
             <Campo label="RustDesk ID" value={dados.rustdesk_id} onChange={(v) => campo("rustdesk_id", v)} />
+          </div>
+        </Card>
+
+        <Card>
+          <h3 className="text-sm font-semibold text-foreground mb-1">Tráfego (NetFlow / Syslog)</h3>
+          <p className="text-xs text-foreground-subtle mb-4">
+            Ative para receber exports de NetFlow v5 e/ou mensagens Syslog enviadas por este equipamento. Cada equipamento pode usar sua própria porta UDP.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex items-end gap-2">
+              <label className="flex items-center gap-2 text-sm text-foreground shrink-0 mb-2">
+                <input type="checkbox" checked={dados.netflow_ativo} onChange={(e) => campo("netflow_ativo", e.target.checked)} />
+                NetFlow v5
+              </label>
+              <div className="flex-1">
+                <label className="label">Porta UDP</label>
+                <input
+                  type="number"
+                  className="input"
+                  value={dados.netflow_porta}
+                  onChange={(e) => campo("netflow_porta", Number(e.target.value))}
+                  disabled={!dados.netflow_ativo}
+                />
+              </div>
+            </div>
+            <div className="flex items-end gap-2">
+              <label className="flex items-center gap-2 text-sm text-foreground shrink-0 mb-2">
+                <input type="checkbox" checked={dados.syslog_ativo} onChange={(e) => campo("syslog_ativo", e.target.checked)} />
+                Syslog
+              </label>
+              <div className="flex-1">
+                <label className="label">Porta UDP</label>
+                <input
+                  type="number"
+                  className="input"
+                  value={dados.syslog_porta}
+                  onChange={(e) => campo("syslog_porta", Number(e.target.value))}
+                  disabled={!dados.syslog_ativo}
+                />
+              </div>
+            </div>
           </div>
         </Card>
 

@@ -78,12 +78,13 @@ authRouter.get("/usuarios", requireAuth, requireRole("administrador"), async (_r
 const atualizarUsuarioSchema = z.object({
   nome: z.string().min(2).optional(),
   email: z.string().email().optional(),
+  senha: z.string().min(6).optional(),
   ativo: z.boolean().optional(),
   perfil: z.enum(["administrador", "operador", "visualizador"]).optional(),
   unidade_id: z.string().uuid().nullable().optional(),
 });
 
-// Editar dados, ativar/desativar ou trocar o perfil de um usuário (ex: promover operador a administrador)
+// Editar dados, trocar a senha, ativar/desativar ou trocar o perfil de um usuário (ex: promover operador a administrador)
 authRouter.patch("/usuarios/:id", requireAuth, requireRole("administrador"), async (req: AuthRequest, res, next) => {
   try {
     const dados = atualizarUsuarioSchema.parse(req.body);
@@ -94,9 +95,15 @@ authRouter.patch("/usuarios/:id", requireAuth, requireRole("administrador"), asy
       return res.status(400).json({ erro: "Você não pode rebaixar seu próprio perfil de administrador" });
     }
 
+    const colunas: Record<string, any> = { ...dados };
+    if (colunas.senha) {
+      colunas.senha_hash = await bcrypt.hash(colunas.senha, 10);
+      delete colunas.senha;
+    }
+
     const campos: string[] = [];
     const valores: any[] = [];
-    Object.entries(dados).forEach(([campo, valor]) => {
+    Object.entries(colunas).forEach(([campo, valor]) => {
       valores.push(valor);
       campos.push(`${campo} = $${valores.length}`);
     });
@@ -108,7 +115,9 @@ authRouter.patch("/usuarios/:id", requireAuth, requireRole("administrador"), asy
       valores
     );
     if (!rows[0]) return res.status(404).json({ erro: "Usuário não encontrado" });
-    await registrarLog(req.user!.sub, "alteracao", "usuarios", req.params.id, dados);
+    // Nunca gravar a senha em texto puro no log de auditoria — registra só que ela foi trocada.
+    const { senha, ...detalhesLog } = dados;
+    await registrarLog(req.user!.sub, "alteracao", "usuarios", req.params.id, senha ? { ...detalhesLog, senha_alterada: true } : detalhesLog);
     res.json(rows[0]);
   } catch (e: any) {
     if (e.code === "23505") return res.status(409).json({ erro: "Já existe um usuário com esse e-mail" });
@@ -127,6 +136,53 @@ authRouter.delete("/usuarios/:id", requireAuth, requireRole("administrador"), as
     if (!rows[0]) return res.status(404).json({ erro: "Usuário não encontrado" });
     await registrarLog(req.user!.sub, "exclusao", "usuarios", req.params.id);
     res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Escopo de dados do usuário: quais clientes/unidades ele pode visualizar.
+// Sem nenhum vínculo, o usuário não é restrito (continua vendo tudo).
+authRouter.get("/usuarios/:id/escopo", requireAuth, requireRole("administrador"), async (req, res, next) => {
+  try {
+    const [{ rows: empresas }, { rows: unidades }] = await Promise.all([
+      query<{ empresa_id: string }>(`SELECT empresa_id FROM usuario_clientes_permitidos WHERE usuario_id = $1`, [req.params.id]),
+      query<{ unidade_id: string }>(`SELECT unidade_id FROM usuario_unidades_permitidas WHERE usuario_id = $1`, [req.params.id]),
+    ]);
+    res.json({ empresa_ids: empresas.map((e) => e.empresa_id), unidade_ids: unidades.map((u) => u.unidade_id) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const escopoSchema = z.object({
+  empresa_ids: z.array(z.string().uuid()).default([]),
+  unidade_ids: z.array(z.string().uuid()).default([]),
+});
+
+authRouter.put("/usuarios/:id/escopo", requireAuth, requireRole("administrador"), async (req: AuthRequest, res, next) => {
+  try {
+    const dados = escopoSchema.parse(req.body);
+    const { rows: existe } = await query(`SELECT id FROM usuarios WHERE id = $1`, [req.params.id]);
+    if (!existe[0]) return res.status(404).json({ erro: "Usuário não encontrado" });
+
+    await query(`DELETE FROM usuario_clientes_permitidos WHERE usuario_id = $1`, [req.params.id]);
+    await query(`DELETE FROM usuario_unidades_permitidas WHERE usuario_id = $1`, [req.params.id]);
+    if (dados.empresa_ids.length > 0) {
+      await query(
+        `INSERT INTO usuario_clientes_permitidos (usuario_id, empresa_id) SELECT $1, unnest($2::uuid[])`,
+        [req.params.id, dados.empresa_ids]
+      );
+    }
+    if (dados.unidade_ids.length > 0) {
+      await query(
+        `INSERT INTO usuario_unidades_permitidas (usuario_id, unidade_id) SELECT $1, unnest($2::uuid[])`,
+        [req.params.id, dados.unidade_ids]
+      );
+    }
+
+    await registrarLog(req.user!.sub, "alteracao", "usuario_escopo", req.params.id, dados);
+    res.json(dados);
   } catch (e) {
     next(e);
   }

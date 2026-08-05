@@ -72,8 +72,32 @@ export interface Equipamento {
   observacoes?: string;
   status: StatusEquipamento;
   ativo: boolean;
+  netflow_ativo: boolean;
+  netflow_porta?: number | null;
+  syslog_ativo: boolean;
+  syslog_porta?: number | null;
   criado_em: string;
   atualizado_em: string;
+}
+
+export interface OidMonitorado {
+  id: string;
+  oid: string;
+  rotulo?: string | null;
+  ultimo_valor?: string | null;
+  ultima_leitura_em?: string | null;
+  criado_em: string;
+}
+
+export interface OidEncontrado {
+  oid: string;
+  tipo: string;
+  valor: string;
+}
+
+export interface EscopoUsuario {
+  empresa_ids: string[];
+  unidade_ids: string[];
 }
 
 export interface ResumoDashboard {
@@ -119,26 +143,6 @@ export interface Unidade {
   empresa_id: string;
   nome: string;
   endereco?: string;
-}
-
-export interface ItemTrafego {
-  chave: string;
-  bytes: number;
-  pct: number;
-}
-
-export interface ResumoTrafego {
-  periodo: string;
-  totalBytes: number;
-  topIps: ItemTrafego[];
-  topAplicacoes: ItemTrafego[];
-  serieTempo: { quando: string; bytes: number }[];
-}
-
-export interface ConfigColetor {
-  ativo: boolean;
-  porta: number;
-  rodando: boolean;
 }
 
 export interface FluxoTrafego {

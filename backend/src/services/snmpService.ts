@@ -95,6 +95,81 @@ export async function consultarInterfacesSnmp(params: SnmpParams): Promise<Inter
   });
 }
 
+export interface OidEncontrado {
+  oid: string;
+  tipo: string;
+  valor: string;
+}
+
+/**
+ * Percorre (SNMPwalk) a subárvore a partir de um OID base (padrão: MIB-2
+ * inteira). Limitado a `limite` varbinds para não travar em dispositivos com
+ * MIBs enormes — suficiente para o usuário identificar o OID que quer
+ * monitorar continuamente.
+ */
+export async function walkSnmp(params: SnmpParams, oidBase = "1.3.6.1.2.1", limite = 300): Promise<OidEncontrado[]> {
+  const community = params.community || decryptSecret(params.communityEnc) || "public";
+  const versionMap: Record<string, any> = { v1: snmp.Version1, v2c: snmp.Version2c };
+  const version = versionMap[params.version] ?? snmp.Version2c;
+
+  const session = snmp.createSession(params.host, community, {
+    version,
+    timeout: params.timeoutMs,
+    retries: 1,
+  });
+
+  const encontrados: OidEncontrado[] = [];
+
+  return new Promise((resolve) => {
+    session.subtree(
+      oidBase,
+      20,
+      (varbinds: any[]) => {
+        for (const vb of varbinds) {
+          if (encontrados.length >= limite) return;
+          if (snmp.isVarbindError(vb)) continue;
+          encontrados.push({
+            oid: vb.oid,
+            tipo: (snmp.ObjectType as Record<number, string>)[vb.type] || String(vb.type),
+            valor: vb.value?.toString?.() ?? String(vb.value),
+          });
+        }
+      },
+      () => {
+        session.close();
+        resolve(encontrados);
+      }
+    );
+  });
+}
+
+/** Consulta um conjunto arbitrário de OIDs (monitoramento customizado por equipamento). */
+export async function consultarOids(params: SnmpParams, oids: string[]): Promise<Record<string, string | null>> {
+  if (oids.length === 0) return {};
+  const community = params.community || decryptSecret(params.communityEnc) || "public";
+  const versionMap: Record<string, any> = { v1: snmp.Version1, v2c: snmp.Version2c };
+  const version = versionMap[params.version] ?? snmp.Version2c;
+
+  const session = snmp.createSession(params.host, community, {
+    version,
+    timeout: params.timeoutMs,
+    retries: 1,
+  });
+
+  return new Promise((resolve) => {
+    session.get(oids, (error: any, varbinds: any[]) => {
+      session.close();
+      if (error) return resolve(Object.fromEntries(oids.map((oid) => [oid, null])));
+
+      const valores: Record<string, string | null> = {};
+      varbinds.forEach((vb) => {
+        valores[vb.oid] = snmp.isVarbindError(vb) ? null : vb.value?.toString?.() ?? String(vb.value);
+      });
+      resolve(valores);
+    });
+  });
+}
+
 export async function consultarSnmp(params: SnmpParams): Promise<SnmpResultado> {
   const community = params.community || decryptSecret(params.communityEnc) || "public";
   const versionMap: Record<string, any> = { v1: snmp.Version1, v2c: snmp.Version2c };

@@ -1,11 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Sun, Moon, Trash2, Plus, Radar, Loader2, UserPlus, Power, Building2, ImageUp, ShieldCheck, Pencil, X, Check } from "lucide-react";
+import { Sun, Moon, Trash2, Plus, Radar, Loader2, UserPlus, Power, Building2, ImageUp, ShieldCheck, Pencil, X, Check, Eye } from "lucide-react";
 import { api } from "../lib/api";
 import { AppLayout } from "../components/layout/AppLayout";
 import { Card } from "../components/ui/Card";
 import { useAuth } from "../lib/auth";
 import { useTheme } from "../hooks/useTheme";
-import { Categoria, Empresa, Unidade, UsuarioConta, Usuario, Perfil, ROTULO_PERFIL, PermissaoPapel } from "../types";
+import { Categoria, Empresa, Unidade, UsuarioConta, Usuario, Perfil, ROTULO_PERFIL, PermissaoPapel, EscopoUsuario } from "../types";
 
 interface ResultadoSnmp {
   hostname: string | null;
@@ -416,8 +416,11 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState<{
-    id: string; nome: string; email: string; empresaId: string; unidadeId: string; unidadeAlterada: boolean;
+    id: string; nome: string; email: string; novaSenha: string; empresaId: string; unidadeId: string; unidadeAlterada: boolean;
   } | null>(null);
+  const [gerenciandoEscopoId, setGerenciandoEscopoId] = useState<string | null>(null);
+  const [escopoSelecionado, setEscopoSelecionado] = useState<EscopoUsuario | null>(null);
+  const [carregandoEscopo, setCarregandoEscopo] = useState(false);
 
   const souAdmin = usuarioLogado?.perfil === "administrador";
 
@@ -464,16 +467,22 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
 
   function iniciarEdicao(u: UsuarioConta) {
     setErro(null);
-    setEditando({ id: u.id, nome: u.nome, email: u.email, empresaId: "", unidadeId: "", unidadeAlterada: false });
+    setGerenciandoEscopoId(null);
+    setEditando({ id: u.id, nome: u.nome, email: u.email, novaSenha: "", empresaId: "", unidadeId: "", unidadeAlterada: false });
   }
 
   async function salvarEdicao(e: FormEvent) {
     e.preventDefault();
     if (!editando) return;
+    if (editando.novaSenha && editando.novaSenha.length < 6) {
+      setErro("A nova senha precisa ter pelo menos 6 caracteres");
+      return;
+    }
     setErro(null);
     try {
       const payload: Record<string, any> = { nome: editando.nome, email: editando.email };
       if (editando.unidadeAlterada) payload.unidade_id = editando.unidadeId || null;
+      if (editando.novaSenha) payload.senha = editando.novaSenha;
       await api.patch(`/auth/usuarios/${editando.id}`, payload);
       setEditando(null);
       carregar();
@@ -494,6 +503,57 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
     }
   }
 
+  async function abrirEscopo(u: UsuarioConta) {
+    setErro(null);
+    setEditando(null);
+    setGerenciandoEscopoId(u.id);
+    setCarregandoEscopo(true);
+    try {
+      const [atual] = await Promise.all([
+        api.get<EscopoUsuario>(`/auth/usuarios/${u.id}/escopo`),
+        Promise.all(empresas.map((emp) => carregarUnidades(emp.id))),
+      ]);
+      setEscopoSelecionado(atual);
+    } catch (e: any) {
+      setErro(e.message || "Não foi possível carregar o acesso do usuário");
+      setGerenciandoEscopoId(null);
+    } finally {
+      setCarregandoEscopo(false);
+    }
+  }
+
+  function alternarEmpresaEscopo(empresaId: string) {
+    setEscopoSelecionado((s) => {
+      if (!s) return s;
+      const empresa_ids = s.empresa_ids.includes(empresaId)
+        ? s.empresa_ids.filter((id) => id !== empresaId)
+        : [...s.empresa_ids, empresaId];
+      return { ...s, empresa_ids };
+    });
+  }
+
+  function alternarUnidadeEscopo(unidadeId: string) {
+    setEscopoSelecionado((s) => {
+      if (!s) return s;
+      const unidade_ids = s.unidade_ids.includes(unidadeId)
+        ? s.unidade_ids.filter((id) => id !== unidadeId)
+        : [...s.unidade_ids, unidadeId];
+      return { ...s, unidade_ids };
+    });
+  }
+
+  async function salvarEscopo() {
+    if (!gerenciandoEscopoId || !escopoSelecionado) return;
+    setErro(null);
+    try {
+      await api.put(`/auth/usuarios/${gerenciandoEscopoId}/escopo`, escopoSelecionado);
+      setGerenciandoEscopoId(null);
+      setEscopoSelecionado(null);
+    } catch (e: any) {
+      setErro(e.message || "Não foi possível salvar o acesso do usuário");
+    }
+  }
+
   return (
     <Card className="lg:col-span-2">
       <h3 className="text-sm font-semibold text-foreground mb-1">Usuários</h3>
@@ -508,7 +568,59 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
         <>
           <ul className="space-y-1.5 mb-4 max-h-72 overflow-y-auto">
             {usuarios.map((u) =>
-              editando?.id === u.id ? (
+              gerenciandoEscopoId === u.id ? (
+                <li key={u.id} className="bg-surface rounded-lg px-3 py-2">
+                  <p className="text-xs text-foreground mb-1">Acesso a clientes/unidades de {u.nome}</p>
+                  <p className="text-xs text-foreground-subtle mb-3">
+                    Sem nenhuma marcação, o usuário vê todos os clientes/unidades (padrão). Marcar um cliente inteiro libera todas as unidades dele, mesmo as futuras.
+                  </p>
+                  {carregandoEscopo || !escopoSelecionado ? (
+                    <p className="text-xs text-foreground-subtle">Carregando…</p>
+                  ) : (
+                    <>
+                      <div className="max-h-64 overflow-y-auto space-y-2 mb-3">
+                        {empresas.map((emp) => (
+                          <div key={emp.id} className="border border-surface-border rounded-lg p-2">
+                            <label className="flex items-center gap-2 text-xs text-foreground cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={escopoSelecionado.empresa_ids.includes(emp.id)}
+                                onChange={() => alternarEmpresaEscopo(emp.id)}
+                              />
+                              <Building2 size={12} className="text-foreground-subtle shrink-0" />
+                              {emp.nome}
+                            </label>
+                            {(unidadesPorEmpresa[emp.id] || []).length > 0 && (
+                              <div className="ml-6 mt-1.5 space-y-1">
+                                {(unidadesPorEmpresa[emp.id] || []).map((un) => (
+                                  <label key={un.id} className="flex items-center gap-2 text-xs text-foreground-subtle cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={escopoSelecionado.empresa_ids.includes(emp.id) || escopoSelecionado.unidade_ids.includes(un.id)}
+                                      disabled={escopoSelecionado.empresa_ids.includes(emp.id)}
+                                      onChange={() => alternarUnidadeEscopo(un.id)}
+                                    />
+                                    {un.nome}
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {empresas.length === 0 && <p className="text-xs text-foreground-subtle">Nenhum cliente cadastrado ainda.</p>}
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <button type="button" className="btn-secondary !py-1 text-xs" onClick={() => { setGerenciandoEscopoId(null); setEscopoSelecionado(null); }}>
+                          <X size={13} /> Cancelar
+                        </button>
+                        <button type="button" className="btn-primary !py-1 text-xs" onClick={salvarEscopo}>
+                          <Check size={13} /> Salvar
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </li>
+              ) : editando?.id === u.id ? (
                 <li key={u.id} className="bg-surface rounded-lg px-3 py-2">
                   <form onSubmit={salvarEdicao} className="grid grid-cols-2 gap-2">
                     <input
@@ -525,6 +637,14 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
                       value={editando.email}
                       onChange={(e) => setEditando({ ...editando, email: e.target.value })}
                       required
+                    />
+                    <input
+                      className="input !py-1 text-xs col-span-2"
+                      type="password"
+                      placeholder="Nova senha (deixe em branco para manter a atual)"
+                      value={editando.novaSenha}
+                      onChange={(e) => setEditando({ ...editando, novaSenha: e.target.value })}
+                      minLength={6}
                     />
                     <select
                       className="input !py-1 text-xs"
@@ -582,6 +702,13 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
                       title="Editar usuário"
                     >
                       <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={() => abrirEscopo(u)}
+                      className="text-foreground-subtle hover:text-brand"
+                      title="Definir clientes/unidades que este usuário pode ver"
+                    >
+                      <Eye size={14} />
                     </button>
                     {u.id !== usuarioLogado?.sub && (
                       <>

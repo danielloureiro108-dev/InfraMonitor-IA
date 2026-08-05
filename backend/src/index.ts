@@ -17,7 +17,7 @@ import { alertasRouter } from "./routes/alertas.routes";
 import { discoveryRouter } from "./routes/discovery.routes";
 import { orgsRouter } from "./routes/orgs.routes";
 import { configRouter, logsRouter } from "./routes/config.routes";
-import { trafegoRouter, inicializarColetoresTrafego } from "./routes/trafego.routes";
+import { trafegoRouter, sincronizarColetoresTrafego } from "./routes/trafego.routes";
 import { agentRouter } from "./routes/agent.routes";
 import { relatoriosRouter } from "./routes/relatorios.routes";
 import { permissoesRouter } from "./routes/permissoes.routes";
@@ -53,7 +53,7 @@ async function start() {
   await bootstrap();
   iniciarWebSocket(server);
   iniciarMonitorWorker();
-  await inicializarColetoresTrafego();
+  await sincronizarColetoresTrafego();
   server.listen(PORT, () => {
     console.log(`[InfraMonitor AI] API rodando em http://localhost:${PORT}`);
   });
