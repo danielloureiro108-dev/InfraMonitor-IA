@@ -1,5 +1,12 @@
 export type StatusEquipamento = "online" | "offline" | "instavel" | "desconhecido";
 export type Perfil = "administrador" | "operador" | "visualizador";
+export type TipoMonitoramento = "icmp" | "snmp";
+
+export const ROTULO_PERFIL: Record<Perfil, string> = {
+  administrador: "Admin",
+  operador: "Editor",
+  visualizador: "Viewer",
+};
 
 export interface Usuario {
   sub: string;
@@ -13,8 +20,19 @@ export interface UsuarioConta {
   nome: string;
   email: string;
   perfil: Perfil;
+  unidade_id?: string | null;
+  unidade_nome?: string | null;
+  empresa_nome?: string | null;
   ativo: boolean;
   criado_em: string;
+}
+
+export interface PermissaoPapel {
+  perfil: Perfil;
+  recurso: string;
+  pode_ler: boolean;
+  pode_escrever: boolean;
+  pode_excluir: boolean;
 }
 
 export interface Equipamento {
@@ -24,9 +42,11 @@ export interface Equipamento {
   empresa_id?: string | null;
   empresa_nome?: string | null;
   unidade_id?: string | null;
+  unidade_nome?: string | null;
   departamento_id?: string | null;
   categoria_id?: string | null;
   categoria_nome?: string | null;
+  tipo_monitoramento: TipoMonitoramento;
   localizacao?: string;
   responsavel?: string;
   fabricante?: string;

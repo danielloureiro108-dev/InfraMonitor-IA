@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { executarPing } from "../services/pingService";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermissao } from "../middleware/auth";
 
 export const discoveryRouter = Router();
 
@@ -30,7 +30,7 @@ function listarIpsDoCidr(cidr: string): string[] {
 
 // Executa varredura de ping em uma sub-rede informada e retorna os hosts que responderam.
 // Limitada a redes /22 ou menores para evitar sobrecarga no worker de monitoramento.
-discoveryRouter.post("/scan", requireAuth, requireRole("administrador", "operador"), async (req, res, next) => {
+discoveryRouter.post("/scan", requireAuth, requirePermissao("descoberta", "escrever"), async (req, res, next) => {
   try {
     const { rede } = cidrSchema.parse(req.body);
     const ips = listarIpsDoCidr(rede);

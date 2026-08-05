@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { query } from "../db";
-import { requireAuth, requireRole, AuthRequest } from "../middleware/auth";
+import { requireAuth, requirePermissao, AuthRequest } from "../middleware/auth";
 import { encryptSecret } from "../utils/crypto";
 import { registrarLog } from "../bootstrap";
 import { consultarSnmp } from "../services/snmpService";
@@ -20,6 +20,7 @@ const equipamentoSchema = z.object({
   unidade_id: z.string().uuid().optional().nullable(),
   departamento_id: z.string().uuid().optional().nullable(),
   categoria_id: z.string().uuid().optional().nullable(),
+  tipo_monitoramento: z.enum(["icmp", "snmp"]).default("icmp"),
   localizacao: z.string().optional(),
   responsavel: z.string().optional(),
   fabricante: z.string().optional(),
@@ -63,13 +64,14 @@ equipamentosRouter.get("/", requireAuth, async (req, res, next) => {
 
     const where = condicoes.length ? `WHERE ${condicoes.join(" AND ")}` : "";
     const { rows } = await query(
-      `SELECT e.id, e.nome, e.descricao, e.empresa_id, e.unidade_id, e.departamento_id, e.categoria_id, e.localizacao, e.responsavel,
+      `SELECT e.id, e.nome, e.descricao, e.empresa_id, e.unidade_id, e.departamento_id, e.categoria_id, e.tipo_monitoramento, e.localizacao, e.responsavel,
               e.fabricante, e.modelo, e.tipo, e.sistema_operacional, e.hostname, e.ip, e.mascara, e.gateway, e.dns, e.mac_address,
               e.numero_serie, e.patrimonio, e.rustdesk_id, e.snmp_version, e.intervalo_monitoramento, e.timeout_ms, e.tentativas,
               e.observacoes, e.status, e.ativo, e.criado_em, e.atualizado_em,
-              emp.nome AS empresa_nome, cat.nome AS categoria_nome
+              emp.nome AS empresa_nome, un.nome AS unidade_nome, cat.nome AS categoria_nome
        FROM equipamentos e
        LEFT JOIN empresas emp ON emp.id = e.empresa_id
+       LEFT JOIN unidades un ON un.id = e.unidade_id
        LEFT JOIN categorias cat ON cat.id = e.categoria_id
        ${where} ORDER BY e.nome ASC`,
       valores
@@ -83,13 +85,14 @@ equipamentosRouter.get("/", requireAuth, async (req, res, next) => {
 equipamentosRouter.get("/:id", requireAuth, async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT e.id, e.nome, e.descricao, e.empresa_id, e.unidade_id, e.departamento_id, e.categoria_id, e.localizacao, e.responsavel,
+      `SELECT e.id, e.nome, e.descricao, e.empresa_id, e.unidade_id, e.departamento_id, e.categoria_id, e.tipo_monitoramento, e.localizacao, e.responsavel,
               e.fabricante, e.modelo, e.tipo, e.sistema_operacional, e.hostname, e.ip, e.mascara, e.gateway, e.dns, e.mac_address,
               e.numero_serie, e.patrimonio, e.rustdesk_id, e.snmp_version, e.snmp_username, e.snmp_auth_protocol,
               e.snmp_privacy_protocol, e.intervalo_monitoramento, e.timeout_ms, e.tentativas, e.observacoes, e.status, e.ativo,
-              e.criado_em, e.atualizado_em, emp.nome AS empresa_nome, cat.nome AS categoria_nome
+              e.criado_em, e.atualizado_em, emp.nome AS empresa_nome, un.nome AS unidade_nome, cat.nome AS categoria_nome
        FROM equipamentos e
        LEFT JOIN empresas emp ON emp.id = e.empresa_id
+       LEFT JOIN unidades un ON un.id = e.unidade_id
        LEFT JOIN categorias cat ON cat.id = e.categoria_id
        WHERE e.id = $1`,
       [req.params.id]
@@ -102,7 +105,7 @@ equipamentosRouter.get("/:id", requireAuth, async (req, res, next) => {
 });
 
 // Teste avulso de consulta SNMP (não depende de um equipamento salvo) — usado em Configurações.
-equipamentosRouter.post("/snmp/testar", requireAuth, requireRole("administrador", "operador"), async (req, res, next) => {
+equipamentosRouter.post("/snmp/testar", requireAuth, requirePermissao("equipamentos", "escrever"), async (req, res, next) => {
   try {
     const dados = z
       .object({
@@ -125,20 +128,20 @@ equipamentosRouter.post("/snmp/testar", requireAuth, requireRole("administrador"
   }
 });
 
-equipamentosRouter.post("/", requireAuth, requireRole("administrador", "operador"), async (req: AuthRequest, res, next) => {
+equipamentosRouter.post("/", requireAuth, requirePermissao("equipamentos", "escrever"), async (req: AuthRequest, res, next) => {
   try {
     const d = equipamentoSchema.parse(req.body);
     const { rows } = await query(
       `INSERT INTO equipamentos (
-        nome, descricao, empresa_id, unidade_id, departamento_id, categoria_id, localizacao, responsavel,
+        nome, descricao, empresa_id, unidade_id, departamento_id, categoria_id, tipo_monitoramento, localizacao, responsavel,
         fabricante, modelo, tipo, sistema_operacional, hostname, ip, mascara, gateway, dns, mac_address,
         numero_serie, patrimonio, rustdesk_id, snmp_version, snmp_community_enc, snmp_username, snmp_password_enc,
         snmp_auth_protocol, snmp_privacy_protocol, intervalo_monitoramento, timeout_ms, tentativas, observacoes, ativo
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
       ) RETURNING id`,
       [
-        d.nome, d.descricao, d.empresa_id, d.unidade_id, d.departamento_id, d.categoria_id, d.localizacao, d.responsavel,
+        d.nome, d.descricao, d.empresa_id, d.unidade_id, d.departamento_id, d.categoria_id, d.tipo_monitoramento, d.localizacao, d.responsavel,
         d.fabricante, d.modelo, d.tipo, d.sistema_operacional, d.hostname, d.ip, d.mascara, d.gateway, d.dns, d.mac_address,
         d.numero_serie, d.patrimonio, d.rustdesk_id, d.snmp_version, encryptSecret(d.snmp_community), d.snmp_username,
         encryptSecret(d.snmp_password), d.snmp_auth_protocol, d.snmp_privacy_protocol, d.intervalo_monitoramento,
@@ -152,7 +155,7 @@ equipamentosRouter.post("/", requireAuth, requireRole("administrador", "operador
   }
 });
 
-equipamentosRouter.put("/:id", requireAuth, requireRole("administrador", "operador"), async (req: AuthRequest, res, next) => {
+equipamentosRouter.put("/:id", requireAuth, requirePermissao("equipamentos", "escrever"), async (req: AuthRequest, res, next) => {
   try {
     const d = equipamentoSchema.partial().parse(req.body);
     const campos: string[] = [];
@@ -181,7 +184,7 @@ equipamentosRouter.put("/:id", requireAuth, requireRole("administrador", "operad
   }
 });
 
-equipamentosRouter.delete("/:id", requireAuth, requireRole("administrador"), async (req: AuthRequest, res, next) => {
+equipamentosRouter.delete("/:id", requireAuth, requirePermissao("equipamentos", "excluir"), async (req: AuthRequest, res, next) => {
   try {
     await query(`DELETE FROM equipamentos WHERE id = $1`, [req.params.id]);
     await registrarLog(req.user!.sub, "exclusao", "equipamentos", req.params.id);

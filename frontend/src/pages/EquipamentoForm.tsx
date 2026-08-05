@@ -3,13 +3,14 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { AppLayout } from "../components/layout/AppLayout";
 import { Card } from "../components/ui/Card";
-import { Categoria, Empresa } from "../types";
+import { Categoria, Empresa, Unidade } from "../types";
 
 const VAZIO = {
-  nome: "", descricao: "", empresa_id: "", categoria_id: "", localizacao: "", responsavel: "",
+  nome: "", descricao: "", empresa_id: "", unidade_id: "", categoria_id: "", localizacao: "", responsavel: "",
   fabricante: "", modelo: "", tipo: "", sistema_operacional: "",
   hostname: "", ip: "", mascara: "", gateway: "", dns: "", mac_address: "",
   numero_serie: "", patrimonio: "", rustdesk_id: "",
+  tipo_monitoramento: "icmp",
   snmp_version: "v2c", snmp_community: "", snmp_username: "", snmp_password: "",
   snmp_auth_protocol: "", snmp_privacy_protocol: "",
   intervalo_monitoramento: 60, timeout_ms: 2000, tentativas: 3,
@@ -24,6 +25,7 @@ export default function EquipamentoForm() {
   const [dados, setDados] = useState<any>(VAZIO);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const [unidades, setUnidades] = useState<Unidade[]>([]);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -31,6 +33,11 @@ export default function EquipamentoForm() {
     api.get<Categoria[]>("/org/categorias").then(setCategorias);
     api.get<Empresa[]>("/org/empresas").then(setEmpresas);
   }, []);
+
+  useEffect(() => {
+    if (!dados.empresa_id) { setUnidades([]); return; }
+    api.get<Unidade[]>(`/org/unidades?empresa_id=${dados.empresa_id}`).then(setUnidades);
+  }, [dados.empresa_id]);
 
   useEffect(() => {
     if (editando) {
@@ -51,7 +58,7 @@ export default function EquipamentoForm() {
     setErro(null);
     setSalvando(true);
     try {
-      const payload = { ...dados, empresa_id: dados.empresa_id || null, categoria_id: dados.categoria_id || null };
+      const payload = { ...dados, empresa_id: dados.empresa_id || null, unidade_id: dados.unidade_id || null, categoria_id: dados.categoria_id || null };
       if (editando) await api.put(`/equipamentos/${id}`, payload);
       else await api.post("/equipamentos", payload);
       navigate("/equipamentos");
@@ -72,10 +79,23 @@ export default function EquipamentoForm() {
 
             <div>
               <label className="label">Cliente</label>
-              <select className="input" value={dados.empresa_id || ""} onChange={(e) => campo("empresa_id", e.target.value)}>
+              <select
+                className="input"
+                value={dados.empresa_id || ""}
+                onChange={(e) => setDados((d: any) => ({ ...d, empresa_id: e.target.value, unidade_id: "" }))}
+              >
                 <option value="">Sem cliente definido</option>
                 {empresas.map((emp) => <option key={emp.id} value={emp.id}>{emp.nome}</option>)}
               </select>
+            </div>
+
+            <div>
+              <label className="label">Unidade</label>
+              <select className="input" value={dados.unidade_id || ""} onChange={(e) => campo("unidade_id", e.target.value)} disabled={!dados.empresa_id}>
+                <option value="">Sem unidade definida</option>
+                {unidades.map((un) => <option key={un.id} value={un.id}>{un.nome}</option>)}
+              </select>
+              {!dados.empresa_id && <p className="text-xs text-foreground-subtle mt-1">Selecione um cliente para escolher a unidade.</p>}
             </div>
 
             <div>
@@ -112,38 +132,52 @@ export default function EquipamentoForm() {
           </div>
         </Card>
 
-        <Card>
-          <h3 className="text-sm font-semibold text-foreground mb-4">SNMP</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <Campo label="Versão" tipo="select" opcoes={["v1", "v2c", "v3"]} value={dados.snmp_version} onChange={(v) => campo("snmp_version", v)} />
-            <Campo
-              label={editando ? "Community (deixe em branco para manter)" : "Community"}
-              tipo="password"
-              value={dados.snmp_community}
-              onChange={(v) => campo("snmp_community", v)}
-            />
-            <Campo label="Usuário (v3)" value={dados.snmp_username} onChange={(v) => campo("snmp_username", v)} />
-            <Campo
-              label={editando ? "Senha v3 (deixe em branco para manter)" : "Senha (v3)"}
-              tipo="password"
-              value={dados.snmp_password}
-              onChange={(v) => campo("snmp_password", v)}
-            />
-            <Campo label="Protocolo de autenticação (v3)" value={dados.snmp_auth_protocol} onChange={(v) => campo("snmp_auth_protocol", v)} />
-            <Campo label="Protocolo de privacidade (v3)" value={dados.snmp_privacy_protocol} onChange={(v) => campo("snmp_privacy_protocol", v)} />
-          </div>
-          <p className="text-xs text-foreground-subtle mt-3">
-            Quer testar a consulta SNMP antes de salvar? Use a ferramenta em Configurações → Testar consulta SNMP.
-          </p>
-        </Card>
+        {dados.tipo_monitoramento === "snmp" && (
+          <Card>
+            <h3 className="text-sm font-semibold text-foreground mb-4">SNMP</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <Campo label="Versão" tipo="select" opcoes={["v1", "v2c", "v3"]} value={dados.snmp_version} onChange={(v) => campo("snmp_version", v)} />
+              <Campo
+                label={editando ? "Community (deixe em branco para manter)" : "Community"}
+                tipo="password"
+                value={dados.snmp_community}
+                onChange={(v) => campo("snmp_community", v)}
+              />
+              <Campo label="Usuário (v3)" value={dados.snmp_username} onChange={(v) => campo("snmp_username", v)} />
+              <Campo
+                label={editando ? "Senha v3 (deixe em branco para manter)" : "Senha (v3)"}
+                tipo="password"
+                value={dados.snmp_password}
+                onChange={(v) => campo("snmp_password", v)}
+              />
+              <Campo label="Protocolo de autenticação (v3)" value={dados.snmp_auth_protocol} onChange={(v) => campo("snmp_auth_protocol", v)} />
+              <Campo label="Protocolo de privacidade (v3)" value={dados.snmp_privacy_protocol} onChange={(v) => campo("snmp_privacy_protocol", v)} />
+            </div>
+            <p className="text-xs text-foreground-subtle mt-3">
+              Quer testar a consulta SNMP antes de salvar? Use a ferramenta em Configurações → Testar consulta SNMP.
+            </p>
+          </Card>
+        )}
 
         <Card>
           <h3 className="text-sm font-semibold text-foreground mb-4">Monitoramento</h3>
           <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="label">Tipo de monitoramento</label>
+              <select className="input" value={dados.tipo_monitoramento} onChange={(e) => campo("tipo_monitoramento", e.target.value)}>
+                <option value="icmp">ICMP (somente ping)</option>
+                <option value="snmp">SNMP (ping + métricas e tráfego de interface)</option>
+              </select>
+            </div>
             <Campo label="Intervalo (segundos)" tipo="number" value={dados.intervalo_monitoramento} onChange={(v) => campo("intervalo_monitoramento", Number(v))} />
             <Campo label="Timeout (ms)" tipo="number" value={dados.timeout_ms} onChange={(v) => campo("timeout_ms", Number(v))} />
             <Campo label="Tentativas" tipo="number" value={dados.tentativas} onChange={(v) => campo("tentativas", Number(v))} />
           </div>
+          {dados.tipo_monitoramento === "snmp" && (
+            <p className="text-xs text-foreground-subtle mt-3">
+              Preencha os dados de acesso SNMP na seção acima. O gráfico de tráfego de entrada/saída com o seletor de interface fica disponível na tela do equipamento assim que houver coletas SNMP.
+            </p>
+          )}
           <div className="mt-4">
             <label className="label">Observações</label>
             <textarea className="input" rows={3} value={dados.observacoes} onChange={(e) => campo("observacoes", e.target.value)} />

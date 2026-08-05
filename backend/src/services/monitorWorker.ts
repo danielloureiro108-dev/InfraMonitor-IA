@@ -85,8 +85,8 @@ async function monitorarEquipamento(equipamento: Equipamento) {
     });
   }
 
-  // ---- SNMP (apenas se o equipamento estiver online e tiver SNMP configurado) ----
-  if (resultadoPing.online && equipamento.snmp_version) {
+  // ---- SNMP (apenas se o equipamento estiver online, o tipo de monitoramento for SNMP e houver SNMP configurado) ----
+  if (resultadoPing.online && equipamento.tipo_monitoramento === "snmp" && equipamento.snmp_version) {
     try {
       const snmpResultado = await consultarSnmp({
         host: equipamento.ip,

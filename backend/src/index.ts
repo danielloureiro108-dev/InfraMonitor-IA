@@ -20,6 +20,7 @@ import { configRouter, logsRouter } from "./routes/config.routes";
 import { trafegoRouter, inicializarColetoresTrafego } from "./routes/trafego.routes";
 import { agentRouter } from "./routes/agent.routes";
 import { relatoriosRouter } from "./routes/relatorios.routes";
+import { permissoesRouter } from "./routes/permissoes.routes";
 
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
@@ -40,6 +41,7 @@ app.use("/api/logs", logsRouter);
 app.use("/api/trafego", trafegoRouter);
 app.use("/api/agent", agentRouter);
 app.use("/api/relatorios", relatoriosRouter);
+app.use("/api/permissoes", permissoesRouter);
 
 app.use(notFound);
 app.use(errorHandler);

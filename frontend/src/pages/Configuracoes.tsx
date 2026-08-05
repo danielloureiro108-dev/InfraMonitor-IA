@@ -1,11 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Sun, Moon, Trash2, Plus, Radar, Loader2, UserPlus, Power, Building2, ImageUp } from "lucide-react";
+import { Sun, Moon, Trash2, Plus, Radar, Loader2, UserPlus, Power, Building2, ImageUp, ShieldCheck } from "lucide-react";
 import { api } from "../lib/api";
 import { AppLayout } from "../components/layout/AppLayout";
 import { Card } from "../components/ui/Card";
 import { useAuth } from "../lib/auth";
 import { useTheme } from "../hooks/useTheme";
-import { Categoria, Empresa, Unidade, UsuarioConta, Usuario } from "../types";
+import { Categoria, Empresa, Unidade, UsuarioConta, Usuario, Perfil, ROTULO_PERFIL, PermissaoPapel } from "../types";
 
 interface ResultadoSnmp {
   hostname: string | null;
@@ -80,6 +80,8 @@ export default function Configuracoes() {
         <CategoriasCard somenteAdmin={somenteAdmin} />
 
         <UsuariosCard usuarioLogado={usuario} />
+
+        <PermissoesCard somenteAdmin={somenteAdmin} />
 
         <TestarSnmpCard valoresPadrao={snmpPadrao} />
 
@@ -403,10 +405,14 @@ function UnidadesCard({ somenteAdmin }: { somenteAdmin: boolean }) {
 
 function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
   const [usuarios, setUsuarios] = useState<UsuarioConta[]>([]);
+  const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const [unidadesPorEmpresa, setUnidadesPorEmpresa] = useState<Record<string, Unidade[]>>({});
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
-  const [perfil, setPerfil] = useState<"operador" | "visualizador" | "administrador">("visualizador");
+  const [perfil, setPerfil] = useState<Perfil>("visualizador");
+  const [empresaId, setEmpresaId] = useState("");
+  const [unidadeId, setUnidadeId] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -418,14 +424,21 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
   }
 
   useEffect(() => { carregar(); }, [souAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (souAdmin) api.get<Empresa[]>("/org/empresas").then(setEmpresas); }, [souAdmin]);
+
+  async function carregarUnidades(empId: string) {
+    if (!empId || unidadesPorEmpresa[empId]) return;
+    const lista = await api.get<Unidade[]>(`/org/unidades?empresa_id=${empId}`);
+    setUnidadesPorEmpresa((atual) => ({ ...atual, [empId]: lista }));
+  }
 
   async function adicionar(e: FormEvent) {
     e.preventDefault();
     setErro(null);
     setSalvando(true);
     try {
-      await api.post("/auth/usuarios", { nome, email, senha, perfil });
-      setNome(""); setEmail(""); setSenha(""); setPerfil("visualizador");
+      await api.post("/auth/usuarios", { nome, email, senha, perfil, unidade_id: unidadeId || undefined });
+      setNome(""); setEmail(""); setSenha(""); setPerfil("visualizador"); setEmpresaId(""); setUnidadeId("");
       carregar();
     } catch (e: any) {
       setErro(e.message || "Não foi possível criar o usuário");
@@ -440,33 +453,54 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
     carregar();
   }
 
+  async function alterarPerfil(u: UsuarioConta, novoPerfil: Perfil) {
+    if (u.id === usuarioLogado?.sub) return;
+    await api.patch(`/auth/usuarios/${u.id}`, { perfil: novoPerfil });
+    carregar();
+  }
+
   return (
     <Card className="lg:col-span-2">
       <h3 className="text-sm font-semibold text-foreground mb-1">Usuários</h3>
-      <p className="text-xs text-foreground-subtle mb-4">Cadastre operadores e visualizadores. Administradores têm acesso total; operadores podem cadastrar/editar equipamentos; visualizadores só consultam.</p>
+      <p className="text-xs text-foreground-subtle mb-4">
+        Cadastre editores e viewers. Admins têm acesso total (ajustável na matriz de permissões abaixo); editores podem cadastrar/editar itens; viewers só consultam.
+        Vincule o usuário a uma unidade para deixar claro a qual filial/site ele pertence.
+      </p>
 
       {!souAdmin ? (
         <p className="text-xs text-foreground-subtle">Somente administradores podem gerenciar usuários.</p>
       ) : (
         <>
-          <ul className="space-y-1.5 mb-4 max-h-60 overflow-y-auto">
+          <ul className="space-y-1.5 mb-4 max-h-72 overflow-y-auto">
             {usuarios.map((u) => (
-              <li key={u.id} className="flex items-center justify-between text-sm bg-surface rounded-lg px-3 py-2">
-                <div>
+              <li key={u.id} className="flex items-center justify-between text-sm bg-surface rounded-lg px-3 py-2 gap-2 flex-wrap">
+                <div className="min-w-0">
                   <span className="text-foreground">{u.nome}</span>
                   <span className="text-foreground-subtle text-xs ml-2">{u.email}</span>
-                  <span className="text-foreground-subtle text-xs ml-2 capitalize">· {u.perfil}</span>
+                  {u.unidade_nome && <span className="text-foreground-subtle text-xs ml-2">· {u.empresa_nome} / {u.unidade_nome}</span>}
                   {!u.ativo && <span className="text-red-400 text-xs ml-2">· inativo</span>}
                 </div>
-                {u.id !== usuarioLogado?.sub && (
-                  <button
-                    onClick={() => alternarAtivo(u)}
-                    className="text-foreground-subtle hover:text-brand"
-                    title={u.ativo ? "Desativar usuário" : "Reativar usuário"}
+                <div className="flex items-center gap-2 shrink-0">
+                  <select
+                    className="input !py-1 !px-2 text-xs w-auto"
+                    value={u.perfil}
+                    disabled={u.id === usuarioLogado?.sub}
+                    onChange={(e) => alterarPerfil(u, e.target.value as Perfil)}
                   >
-                    <Power size={14} className={u.ativo ? "" : "text-red-400"} />
-                  </button>
-                )}
+                    <option value="administrador">{ROTULO_PERFIL.administrador}</option>
+                    <option value="operador">{ROTULO_PERFIL.operador}</option>
+                    <option value="visualizador">{ROTULO_PERFIL.visualizador}</option>
+                  </select>
+                  {u.id !== usuarioLogado?.sub && (
+                    <button
+                      onClick={() => alternarAtivo(u)}
+                      className="text-foreground-subtle hover:text-brand"
+                      title={u.ativo ? "Desativar usuário" : "Reativar usuário"}
+                    >
+                      <Power size={14} className={u.ativo ? "" : "text-red-400"} />
+                    </button>
+                  )}
+                </div>
               </li>
             ))}
             {usuarios.length === 0 && <p className="text-xs text-foreground-subtle">Nenhum usuário cadastrado ainda.</p>}
@@ -476,10 +510,22 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
             <input className="input" placeholder="Nome" value={nome} onChange={(e) => setNome(e.target.value)} required />
             <input className="input" type="email" placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} required />
             <input className="input" type="password" placeholder="Senha (mín. 6 caracteres)" value={senha} onChange={(e) => setSenha(e.target.value)} required minLength={6} />
-            <select className="input" value={perfil} onChange={(e) => setPerfil(e.target.value as any)}>
-              <option value="visualizador">Visualizador</option>
-              <option value="operador">Operador</option>
-              <option value="administrador">Administrador</option>
+            <select className="input" value={perfil} onChange={(e) => setPerfil(e.target.value as Perfil)}>
+              <option value="visualizador">{ROTULO_PERFIL.visualizador}</option>
+              <option value="operador">{ROTULO_PERFIL.operador}</option>
+              <option value="administrador">{ROTULO_PERFIL.administrador}</option>
+            </select>
+            <select
+              className="input"
+              value={empresaId}
+              onChange={(e) => { setEmpresaId(e.target.value); setUnidadeId(""); carregarUnidades(e.target.value); }}
+            >
+              <option value="">Cliente (opcional)</option>
+              {empresas.map((emp) => <option key={emp.id} value={emp.id}>{emp.nome}</option>)}
+            </select>
+            <select className="input" value={unidadeId} onChange={(e) => setUnidadeId(e.target.value)} disabled={!empresaId}>
+              <option value="">Unidade (opcional)</option>
+              {(unidadesPorEmpresa[empresaId] || []).map((un) => <option key={un.id} value={un.id}>{un.nome}</option>)}
             </select>
             <button className="btn-secondary col-span-2" disabled={salvando}>
               <UserPlus size={14} /> {salvando ? "Criando…" : "Criar usuário"}
@@ -489,6 +535,124 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
         </>
       )}
     </Card>
+  );
+}
+
+const RECURSOS: { chave: string; rotulo: string }[] = [
+  { chave: "equipamentos", rotulo: "Itens do cliente (equipamentos)" },
+  { chave: "clientes", rotulo: "Clientes" },
+  { chave: "unidades", rotulo: "Unidades" },
+  { chave: "departamentos", rotulo: "Departamentos" },
+  { chave: "categorias", rotulo: "Categorias" },
+  { chave: "alertas", rotulo: "Alertas" },
+  { chave: "descoberta", rotulo: "Descoberta de rede" },
+  { chave: "relatorios", rotulo: "Relatórios" },
+  { chave: "usuarios", rotulo: "Usuários" },
+  { chave: "configuracoes", rotulo: "Configurações" },
+];
+
+const PAPEIS: Perfil[] = ["administrador", "operador", "visualizador"];
+
+function PermissoesCard({ somenteAdmin }: { somenteAdmin: boolean }) {
+  const [matriz, setMatriz] = useState<Record<string, PermissaoPapel>>({});
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
+
+  async function carregar() {
+    if (!somenteAdmin) { setCarregando(false); return; }
+    try {
+      const linhas = await api.get<PermissaoPapel[]>("/permissoes");
+      const mapa: Record<string, PermissaoPapel> = {};
+      linhas.forEach((l) => { mapa[`${l.perfil}:${l.recurso}`] = l; });
+      setMatriz(mapa);
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  useEffect(() => { carregar(); }, [somenteAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function valorCelula(perfil: Perfil, recurso: string): PermissaoPapel {
+    return matriz[`${perfil}:${recurso}`] || { perfil, recurso, pode_ler: false, pode_escrever: false, pode_excluir: false };
+  }
+
+  async function alternar(perfil: Perfil, recurso: string, campo: "pode_ler" | "pode_escrever" | "pode_excluir") {
+    if (perfil === "administrador") return; // administrador sempre tem acesso total, não é editável
+    const atual = valorCelula(perfil, recurso);
+    const novo = { ...atual, [campo]: !atual[campo] };
+    setMatriz((m) => ({ ...m, [`${perfil}:${recurso}`]: novo }));
+    setErro(null);
+    try {
+      await api.put(`/permissoes/${perfil}/${recurso}`, {
+        pode_ler: novo.pode_ler,
+        pode_escrever: novo.pode_escrever,
+        pode_excluir: novo.pode_excluir,
+      });
+    } catch (e: any) {
+      setMatriz((m) => ({ ...m, [`${perfil}:${recurso}`]: atual }));
+      setErro(e.message || "Não foi possível salvar a permissão");
+    }
+  }
+
+  return (
+    <Card className="lg:col-span-2">
+      <div className="flex items-center gap-2 mb-1">
+        <ShieldCheck size={16} className="text-brand" />
+        <h3 className="text-sm font-semibold text-foreground">Permissões por papel</h3>
+      </div>
+      <p className="text-xs text-foreground-subtle mb-4">
+        Defina o que cada papel pode fazer em cada tipo de item (ex: um Viewer pode visualizar os itens do cliente, mas não cadastrar nem excluir). Admin sempre tem acesso total.
+      </p>
+
+      {!somenteAdmin ? (
+        <p className="text-xs text-foreground-subtle">Somente administradores podem gerenciar permissões.</p>
+      ) : carregando ? (
+        <p className="text-xs text-foreground-subtle">Carregando…</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-foreground-subtle text-left border-b border-surface-border">
+                <th className="py-1.5 pr-3">Item</th>
+                {PAPEIS.map((p) => (
+                  <th key={p} className="py-1.5 px-3 text-center whitespace-nowrap">{ROTULO_PERFIL[p]}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {RECURSOS.map((r) => (
+                <tr key={r.chave} className="border-b border-surface-border/50">
+                  <td className="py-2 pr-3 text-foreground whitespace-nowrap">{r.rotulo}</td>
+                  {PAPEIS.map((p) => {
+                    const c = valorCelula(p, r.chave);
+                    const admin = p === "administrador";
+                    return (
+                      <td key={p} className="py-2 px-3">
+                        <div className="flex items-center justify-center gap-2.5" title={admin ? "Administrador sempre tem acesso total" : undefined}>
+                          <CheckboxPermissao rotulo="Ler" marcado={admin || c.pode_ler} desabilitado={admin} onChange={() => alternar(p, r.chave, "pode_ler")} />
+                          <CheckboxPermissao rotulo="Escrever" marcado={admin || c.pode_escrever} desabilitado={admin} onChange={() => alternar(p, r.chave, "pode_escrever")} />
+                          <CheckboxPermissao rotulo="Excluir" marcado={admin || c.pode_excluir} desabilitado={admin} onChange={() => alternar(p, r.chave, "pode_excluir")} />
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {erro && <p className="text-xs text-red-400 mt-2">{erro}</p>}
+    </Card>
+  );
+}
+
+function CheckboxPermissao({ rotulo, marcado, desabilitado, onChange }: { rotulo: string; marcado: boolean; desabilitado?: boolean; onChange: () => void }) {
+  return (
+    <label className={`flex flex-col items-center gap-0.5 ${desabilitado ? "opacity-50" : "cursor-pointer"}`} title={rotulo}>
+      <input type="checkbox" checked={marcado} disabled={desabilitado} onChange={onChange} />
+      <span className="text-[10px] text-foreground-subtle">{rotulo[0]}</span>
+    </label>
   );
 }
 function CategoriasCard({ somenteAdmin }: { somenteAdmin: boolean }) {

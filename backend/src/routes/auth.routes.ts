@@ -40,6 +40,7 @@ const cadastroSchema = z.object({
   email: z.string().email(),
   senha: z.string().min(6),
   perfil: z.enum(["administrador", "operador", "visualizador"]).default("visualizador"),
+  unidade_id: z.string().uuid().optional().nullable(),
 });
 
 // Apenas administradores podem cadastrar novos usuários
@@ -48,8 +49,8 @@ authRouter.post("/usuarios", requireAuth, requireRole("administrador"), async (r
     const dados = cadastroSchema.parse(req.body);
     const hash = await bcrypt.hash(dados.senha, 10);
     const { rows } = await query(
-      `INSERT INTO usuarios (nome, email, senha_hash, perfil) VALUES ($1,$2,$3,$4) RETURNING id, nome, email, perfil, ativo, criado_em`,
-      [dados.nome, dados.email, hash, dados.perfil]
+      `INSERT INTO usuarios (nome, email, senha_hash, perfil, unidade_id) VALUES ($1,$2,$3,$4,$5) RETURNING id, nome, email, perfil, unidade_id, ativo, criado_em`,
+      [dados.nome, dados.email, hash, dados.perfil, dados.unidade_id || null]
     );
     await registrarLog(req.user!.sub, "cadastro", "usuarios", rows[0].id);
     res.status(201).json(rows[0]);
@@ -61,7 +62,13 @@ authRouter.post("/usuarios", requireAuth, requireRole("administrador"), async (r
 
 authRouter.get("/usuarios", requireAuth, requireRole("administrador"), async (_req, res, next) => {
   try {
-    const { rows } = await query(`SELECT id, nome, email, perfil, ativo, criado_em FROM usuarios ORDER BY criado_em DESC`);
+    const { rows } = await query(
+      `SELECT u.id, u.nome, u.email, u.perfil, u.unidade_id, u.ativo, u.criado_em, un.nome AS unidade_nome, emp.nome AS empresa_nome
+       FROM usuarios u
+       LEFT JOIN unidades un ON un.id = u.unidade_id
+       LEFT JOIN empresas emp ON emp.id = un.empresa_id
+       ORDER BY u.criado_em DESC`
+    );
     res.json(rows);
   } catch (e) {
     next(e);
@@ -69,8 +76,10 @@ authRouter.get("/usuarios", requireAuth, requireRole("administrador"), async (_r
 });
 
 const atualizarUsuarioSchema = z.object({
+  nome: z.string().min(2).optional(),
   ativo: z.boolean().optional(),
   perfil: z.enum(["administrador", "operador", "visualizador"]).optional(),
+  unidade_id: z.string().uuid().nullable().optional(),
 });
 
 // Ativar/desativar um usuário ou trocar seu perfil (ex: promover operador a administrador)
@@ -79,6 +88,9 @@ authRouter.patch("/usuarios/:id", requireAuth, requireRole("administrador"), asy
     const dados = atualizarUsuarioSchema.parse(req.body);
     if (req.params.id === req.user!.sub && dados.ativo === false) {
       return res.status(400).json({ erro: "Você não pode desativar sua própria conta" });
+    }
+    if (req.params.id === req.user!.sub && dados.perfil && dados.perfil !== "administrador") {
+      return res.status(400).json({ erro: "Você não pode rebaixar seu próprio perfil de administrador" });
     }
 
     const campos: string[] = [];
@@ -91,7 +103,7 @@ authRouter.patch("/usuarios/:id", requireAuth, requireRole("administrador"), asy
 
     valores.push(req.params.id);
     const { rows } = await query(
-      `UPDATE usuarios SET ${campos.join(", ")} WHERE id = $${valores.length} RETURNING id, nome, email, perfil, ativo, criado_em`,
+      `UPDATE usuarios SET ${campos.join(", ")} WHERE id = $${valores.length} RETURNING id, nome, email, perfil, unidade_id, ativo, criado_em`,
       valores
     );
     if (!rows[0]) return res.status(404).json({ erro: "Usuário não encontrado" });
