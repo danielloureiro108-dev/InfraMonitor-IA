@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { query } from "../db";
-import { requireAuth, AuthRequest } from "../middleware/auth";
+import { requireAuth, requirePermissao, AuthRequest } from "../middleware/auth";
 import { registrarLog } from "../bootstrap";
 
 export const alertasRouter = Router();
@@ -28,7 +28,7 @@ alertasRouter.get("/", requireAuth, async (req, res, next) => {
   }
 });
 
-alertasRouter.post("/:id/confirmar", requireAuth, async (req: AuthRequest, res, next) => {
+alertasRouter.post("/:id/confirmar", requireAuth, requirePermissao("alertas", "escrever"), async (req: AuthRequest, res, next) => {
   try {
     const { rows } = await query(
       `UPDATE alertas SET status = 'confirmado', confirmado_em = now(), confirmado_por = $1 WHERE id = $2 RETURNING id`,

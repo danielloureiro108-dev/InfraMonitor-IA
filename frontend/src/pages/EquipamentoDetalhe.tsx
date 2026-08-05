@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { AppLayout } from "../components/layout/AppLayout";
 import { Card } from "../components/ui/Card";
 import { StatusBadge } from "../components/ui/StatusBadge";
-import { Equipamento } from "../types";
+import { Equipamento, FluxoTrafego } from "../types";
 
 interface PingRegistro {
   online: boolean;
@@ -90,12 +90,14 @@ export default function EquipamentoDetalhe() {
         </ResponsiveContainer>
       </Card>
 
-      <TrafegoInterfaceCard equipamentoId={equipamento.id} />
+      {equipamento.tipo_monitoramento === "snmp" && <TrafegoInterfaceCard equipamentoId={equipamento.id} />}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <Card>
           <h3 className="text-sm font-medium text-foreground mb-3">Informações do cadastro</h3>
           <dl className="text-sm space-y-2">
+            <Linha rotulo="Cliente" valor={equipamento.empresa_nome} />
+            <Linha rotulo="Unidade" valor={equipamento.unidade_nome} />
             <Linha rotulo="Fabricante" valor={equipamento.fabricante} />
             <Linha rotulo="Modelo" valor={equipamento.modelo} />
             <Linha rotulo="Sistema Operacional" valor={equipamento.sistema_operacional} />
@@ -103,6 +105,7 @@ export default function EquipamentoDetalhe() {
             <Linha rotulo="Localização" valor={equipamento.localizacao} />
             <Linha rotulo="Patrimônio" valor={equipamento.patrimonio} />
             <Linha rotulo="RustDesk ID" valor={equipamento.rustdesk_id} />
+            <Linha rotulo="Tipo de monitoramento" valor={equipamento.tipo_monitoramento === "snmp" ? "SNMP" : "ICMP"} />
           </dl>
         </Card>
         <Card>
@@ -120,6 +123,8 @@ export default function EquipamentoDetalhe() {
           )}
         </Card>
       </div>
+
+      <TrafegoFlowsCard equipamentoId={equipamento.id} />
     </AppLayout>
   );
 }
@@ -229,6 +234,78 @@ function TrafegoInterfaceCard({ equipamentoId }: { equipamentoId: string }) {
             <p className="text-xs text-foreground-subtle mt-2">Capacidade nominal da interface: {(interfaceAtual.if_speed / 1_000_000).toFixed(0)} Mbps</p>
           )}
         </>
+      )}
+    </Card>
+  );
+}
+
+function formatarBytes(bytes: number): string {
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(2)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+function TrafegoFlowsCard({ equipamentoId }: { equipamentoId: string }) {
+  const [periodo, setPeriodo] = useState("24h");
+  const [fluxos, setFluxos] = useState<FluxoTrafego[]>([]);
+  const [carregando, setCarregando] = useState(true);
+
+  useEffect(() => {
+    setCarregando(true);
+    api
+      .get<FluxoTrafego[]>(`/trafego/flows?equipamento_id=${equipamentoId}&periodo=${periodo}&limite=100`)
+      .then(setFluxos)
+      .finally(() => setCarregando(false));
+  }, [equipamentoId, periodo]);
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <div>
+          <h3 className="text-sm font-medium text-foreground">Tráfego NetFlow / Syslog</h3>
+          <p className="text-xs text-foreground-subtle mt-1">Fluxos capturados em que este equipamento foi o exportador (NetFlow) ou a origem do log (Syslog).</p>
+        </div>
+        <select className="input max-w-[130px] !py-1.5 text-xs" value={periodo} onChange={(e) => setPeriodo(e.target.value)}>
+          {PERIODOS.map((p) => <option key={p.valor} value={p.valor}>{p.rotulo}</option>)}
+        </select>
+      </div>
+
+      {carregando ? (
+        <p className="text-xs text-foreground-subtle">Carregando…</p>
+      ) : fluxos.length === 0 ? (
+        <p className="text-xs text-foreground-subtle">
+          Nenhum fluxo NetFlow ou Syslog registrado para este equipamento no período. Ative os coletores em Configurações → Tráfego e confirme que o equipamento está enviando dados para este servidor.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-foreground-subtle text-left border-b border-surface-border">
+                <th className="py-1.5 pr-3">Origem</th>
+                <th className="py-1.5 pr-3">IP origem</th>
+                <th className="py-1.5 pr-3">IP destino</th>
+                <th className="py-1.5 pr-3">Protocolo</th>
+                <th className="py-1.5 pr-3">Aplicação</th>
+                <th className="py-1.5 pr-3">Bytes</th>
+                <th className="py-1.5">Quando</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fluxos.map((f) => (
+                <tr key={f.id} className="border-b border-surface-border/50">
+                  <td className="py-1.5 pr-3 uppercase text-foreground-subtle">{f.origem_tipo}</td>
+                  <td className="py-1.5 pr-3 font-mono text-foreground">{f.ip_origem || "—"}{f.porta_origem ? `:${f.porta_origem}` : ""}</td>
+                  <td className="py-1.5 pr-3 font-mono text-foreground">{f.ip_destino || "—"}{f.porta_destino ? `:${f.porta_destino}` : ""}</td>
+                  <td className="py-1.5 pr-3 text-foreground">{f.protocolo || "—"}</td>
+                  <td className="py-1.5 pr-3 text-foreground">{f.aplicacao || "—"}</td>
+                  <td className="py-1.5 pr-3 text-foreground">{formatarBytes(f.bytes)}</td>
+                  <td className="py-1.5 text-foreground-subtle">{new Date(f.capturado_em).toLocaleString("pt-BR")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   );

@@ -1,4 +1,5 @@
 export type StatusEquipamento = "online" | "offline" | "instavel" | "desconhecido";
+export type TipoMonitoramento = "icmp" | "snmp";
 
 export interface Equipamento {
   id: string;
@@ -8,6 +9,7 @@ export interface Equipamento {
   unidade_id?: string;
   departamento_id?: string;
   categoria_id?: string;
+  tipo_monitoramento: TipoMonitoramento;
   localizacao?: string;
   responsavel?: string;
   fabricante?: string;

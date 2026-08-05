@@ -138,12 +138,19 @@ trafegoRouter.get("/insights", requireAuth, async (req, res, next) => {
 
 trafegoRouter.get("/flows", requireAuth, async (req, res, next) => {
   try {
-    const { periodo, limite } = req.query as Record<string, string>;
+    const { periodo, limite, equipamento_id } = req.query as Record<string, string>;
     const { intervalo } = resolverPeriodo(periodo);
+    const valores: any[] = [];
+    let condicaoEquipamento = "";
+    if (equipamento_id) {
+      valores.push(equipamento_id);
+      condicaoEquipamento = `AND equipamento_id = $${valores.length}`;
+    }
+    valores.push(Math.min(Number(limite) || 100, 500));
     const { rows } = await query(
-      `SELECT * FROM trafego_flows WHERE capturado_em > now() - interval '${intervalo}'
-       ORDER BY capturado_em DESC LIMIT $1`,
-      [Math.min(Number(limite) || 100, 500)]
+      `SELECT * FROM trafego_flows WHERE capturado_em > now() - interval '${intervalo}' ${condicaoEquipamento}
+       ORDER BY capturado_em DESC LIMIT $${valores.length}`,
+      valores
     );
     res.json(rows);
   } catch (e) {
