@@ -77,12 +77,13 @@ authRouter.get("/usuarios", requireAuth, requireRole("administrador"), async (_r
 
 const atualizarUsuarioSchema = z.object({
   nome: z.string().min(2).optional(),
+  email: z.string().email().optional(),
   ativo: z.boolean().optional(),
   perfil: z.enum(["administrador", "operador", "visualizador"]).optional(),
   unidade_id: z.string().uuid().nullable().optional(),
 });
 
-// Ativar/desativar um usuário ou trocar seu perfil (ex: promover operador a administrador)
+// Editar dados, ativar/desativar ou trocar o perfil de um usuário (ex: promover operador a administrador)
 authRouter.patch("/usuarios/:id", requireAuth, requireRole("administrador"), async (req: AuthRequest, res, next) => {
   try {
     const dados = atualizarUsuarioSchema.parse(req.body);
@@ -109,6 +110,23 @@ authRouter.patch("/usuarios/:id", requireAuth, requireRole("administrador"), asy
     if (!rows[0]) return res.status(404).json({ erro: "Usuário não encontrado" });
     await registrarLog(req.user!.sub, "alteracao", "usuarios", req.params.id, dados);
     res.json(rows[0]);
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ erro: "Já existe um usuário com esse e-mail" });
+    next(e);
+  }
+});
+
+// Excluir definitivamente um usuário (ações já registradas em "logs"/"alertas" continuam,
+// apenas perdem a referência ao autor — ver migração 005).
+authRouter.delete("/usuarios/:id", requireAuth, requireRole("administrador"), async (req: AuthRequest, res, next) => {
+  try {
+    if (req.params.id === req.user!.sub) {
+      return res.status(400).json({ erro: "Você não pode excluir sua própria conta" });
+    }
+    const { rows } = await query(`DELETE FROM usuarios WHERE id = $1 RETURNING id`, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ erro: "Usuário não encontrado" });
+    await registrarLog(req.user!.sub, "exclusao", "usuarios", req.params.id);
+    res.status(204).send();
   } catch (e) {
     next(e);
   }
