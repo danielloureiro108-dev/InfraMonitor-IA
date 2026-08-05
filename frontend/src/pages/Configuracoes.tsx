@@ -416,7 +416,7 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState<{
-    id: string; nome: string; email: string; empresaId: string; unidadeId: string; unidadeAlterada: boolean;
+    id: string; nome: string; email: string; novaSenha: string; empresaId: string; unidadeId: string; unidadeAlterada: boolean;
   } | null>(null);
 
   const souAdmin = usuarioLogado?.perfil === "administrador";
@@ -464,16 +464,21 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
 
   function iniciarEdicao(u: UsuarioConta) {
     setErro(null);
-    setEditando({ id: u.id, nome: u.nome, email: u.email, empresaId: "", unidadeId: "", unidadeAlterada: false });
+    setEditando({ id: u.id, nome: u.nome, email: u.email, novaSenha: "", empresaId: "", unidadeId: "", unidadeAlterada: false });
   }
 
   async function salvarEdicao(e: FormEvent) {
     e.preventDefault();
     if (!editando) return;
+    if (editando.novaSenha && editando.novaSenha.length < 6) {
+      setErro("A nova senha precisa ter pelo menos 6 caracteres");
+      return;
+    }
     setErro(null);
     try {
       const payload: Record<string, any> = { nome: editando.nome, email: editando.email };
       if (editando.unidadeAlterada) payload.unidade_id = editando.unidadeId || null;
+      if (editando.novaSenha) payload.senha = editando.novaSenha;
       await api.patch(`/auth/usuarios/${editando.id}`, payload);
       setEditando(null);
       carregar();
@@ -525,6 +530,14 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
                       value={editando.email}
                       onChange={(e) => setEditando({ ...editando, email: e.target.value })}
                       required
+                    />
+                    <input
+                      className="input !py-1 text-xs col-span-2"
+                      type="password"
+                      placeholder="Nova senha (deixe em branco para manter a atual)"
+                      value={editando.novaSenha}
+                      onChange={(e) => setEditando({ ...editando, novaSenha: e.target.value })}
+                      minLength={6}
                     />
                     <select
                       className="input !py-1 text-xs"

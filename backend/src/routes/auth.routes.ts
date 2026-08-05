@@ -78,12 +78,13 @@ authRouter.get("/usuarios", requireAuth, requireRole("administrador"), async (_r
 const atualizarUsuarioSchema = z.object({
   nome: z.string().min(2).optional(),
   email: z.string().email().optional(),
+  senha: z.string().min(6).optional(),
   ativo: z.boolean().optional(),
   perfil: z.enum(["administrador", "operador", "visualizador"]).optional(),
   unidade_id: z.string().uuid().nullable().optional(),
 });
 
-// Editar dados, ativar/desativar ou trocar o perfil de um usuário (ex: promover operador a administrador)
+// Editar dados, trocar a senha, ativar/desativar ou trocar o perfil de um usuário (ex: promover operador a administrador)
 authRouter.patch("/usuarios/:id", requireAuth, requireRole("administrador"), async (req: AuthRequest, res, next) => {
   try {
     const dados = atualizarUsuarioSchema.parse(req.body);
@@ -94,9 +95,15 @@ authRouter.patch("/usuarios/:id", requireAuth, requireRole("administrador"), asy
       return res.status(400).json({ erro: "Você não pode rebaixar seu próprio perfil de administrador" });
     }
 
+    const colunas: Record<string, any> = { ...dados };
+    if (colunas.senha) {
+      colunas.senha_hash = await bcrypt.hash(colunas.senha, 10);
+      delete colunas.senha;
+    }
+
     const campos: string[] = [];
     const valores: any[] = [];
-    Object.entries(dados).forEach(([campo, valor]) => {
+    Object.entries(colunas).forEach(([campo, valor]) => {
       valores.push(valor);
       campos.push(`${campo} = $${valores.length}`);
     });
@@ -108,7 +115,9 @@ authRouter.patch("/usuarios/:id", requireAuth, requireRole("administrador"), asy
       valores
     );
     if (!rows[0]) return res.status(404).json({ erro: "Usuário não encontrado" });
-    await registrarLog(req.user!.sub, "alteracao", "usuarios", req.params.id, dados);
+    // Nunca gravar a senha em texto puro no log de auditoria — registra só que ela foi trocada.
+    const { senha, ...detalhesLog } = dados;
+    await registrarLog(req.user!.sub, "alteracao", "usuarios", req.params.id, senha ? { ...detalhesLog, senha_alterada: true } : detalhesLog);
     res.json(rows[0]);
   } catch (e: any) {
     if (e.code === "23505") return res.status(409).json({ erro: "Já existe um usuário com esse e-mail" });
