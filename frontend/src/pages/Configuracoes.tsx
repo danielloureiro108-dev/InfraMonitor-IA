@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Sun, Moon, Trash2, Plus, Radar, Loader2, UserPlus, Power, Building2, ImageUp, ShieldCheck } from "lucide-react";
+import { Sun, Moon, Trash2, Plus, Radar, Loader2, UserPlus, Power, Building2, ImageUp, ShieldCheck, Pencil, X, Check } from "lucide-react";
 import { api } from "../lib/api";
 import { AppLayout } from "../components/layout/AppLayout";
 import { Card } from "../components/ui/Card";
@@ -415,6 +415,9 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
   const [unidadeId, setUnidadeId] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [editando, setEditando] = useState<{
+    id: string; nome: string; email: string; empresaId: string; unidadeId: string; unidadeAlterada: boolean;
+  } | null>(null);
 
   const souAdmin = usuarioLogado?.perfil === "administrador";
 
@@ -459,6 +462,38 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
     carregar();
   }
 
+  function iniciarEdicao(u: UsuarioConta) {
+    setErro(null);
+    setEditando({ id: u.id, nome: u.nome, email: u.email, empresaId: "", unidadeId: "", unidadeAlterada: false });
+  }
+
+  async function salvarEdicao(e: FormEvent) {
+    e.preventDefault();
+    if (!editando) return;
+    setErro(null);
+    try {
+      const payload: Record<string, any> = { nome: editando.nome, email: editando.email };
+      if (editando.unidadeAlterada) payload.unidade_id = editando.unidadeId || null;
+      await api.patch(`/auth/usuarios/${editando.id}`, payload);
+      setEditando(null);
+      carregar();
+    } catch (e: any) {
+      setErro(e.message || "Não foi possível salvar as alterações");
+    }
+  }
+
+  async function excluir(u: UsuarioConta) {
+    if (u.id === usuarioLogado?.sub) return;
+    if (!confirm(`Excluir o usuário "${u.nome}"? Essa ação não pode ser desfeita.`)) return;
+    setErro(null);
+    try {
+      await api.delete(`/auth/usuarios/${u.id}`);
+      carregar();
+    } catch (e: any) {
+      setErro(e.message || "Não foi possível excluir o usuário");
+    }
+  }
+
   return (
     <Card className="lg:col-span-2">
       <h3 className="text-sm font-semibold text-foreground mb-1">Usuários</h3>
@@ -472,37 +507,104 @@ function UsuariosCard({ usuarioLogado }: { usuarioLogado: Usuario | null }) {
       ) : (
         <>
           <ul className="space-y-1.5 mb-4 max-h-72 overflow-y-auto">
-            {usuarios.map((u) => (
-              <li key={u.id} className="flex items-center justify-between text-sm bg-surface rounded-lg px-3 py-2 gap-2 flex-wrap">
-                <div className="min-w-0">
-                  <span className="text-foreground">{u.nome}</span>
-                  <span className="text-foreground-subtle text-xs ml-2">{u.email}</span>
-                  {u.unidade_nome && <span className="text-foreground-subtle text-xs ml-2">· {u.empresa_nome} / {u.unidade_nome}</span>}
-                  {!u.ativo && <span className="text-red-400 text-xs ml-2">· inativo</span>}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <select
-                    className="input !py-1 !px-2 text-xs w-auto"
-                    value={u.perfil}
-                    disabled={u.id === usuarioLogado?.sub}
-                    onChange={(e) => alterarPerfil(u, e.target.value as Perfil)}
-                  >
-                    <option value="administrador">{ROTULO_PERFIL.administrador}</option>
-                    <option value="operador">{ROTULO_PERFIL.operador}</option>
-                    <option value="visualizador">{ROTULO_PERFIL.visualizador}</option>
-                  </select>
-                  {u.id !== usuarioLogado?.sub && (
-                    <button
-                      onClick={() => alternarAtivo(u)}
-                      className="text-foreground-subtle hover:text-brand"
-                      title={u.ativo ? "Desativar usuário" : "Reativar usuário"}
+            {usuarios.map((u) =>
+              editando?.id === u.id ? (
+                <li key={u.id} className="bg-surface rounded-lg px-3 py-2">
+                  <form onSubmit={salvarEdicao} className="grid grid-cols-2 gap-2">
+                    <input
+                      className="input !py-1 text-xs"
+                      placeholder="Nome"
+                      value={editando.nome}
+                      onChange={(e) => setEditando({ ...editando, nome: e.target.value })}
+                      required
+                    />
+                    <input
+                      className="input !py-1 text-xs"
+                      type="email"
+                      placeholder="E-mail"
+                      value={editando.email}
+                      onChange={(e) => setEditando({ ...editando, email: e.target.value })}
+                      required
+                    />
+                    <select
+                      className="input !py-1 text-xs"
+                      value={editando.empresaId}
+                      onChange={(e) => {
+                        const empId = e.target.value;
+                        setEditando({ ...editando, empresaId: empId, unidadeId: "", unidadeAlterada: true });
+                        carregarUnidades(empId);
+                      }}
                     >
-                      <Power size={14} className={u.ativo ? "" : "text-red-400"} />
+                      <option value="">Cliente (manter unidade atual)</option>
+                      {empresas.map((emp) => <option key={emp.id} value={emp.id}>{emp.nome}</option>)}
+                    </select>
+                    <select
+                      className="input !py-1 text-xs"
+                      value={editando.unidadeId}
+                      disabled={!editando.empresaId}
+                      onChange={(e) => setEditando({ ...editando, unidadeId: e.target.value, unidadeAlterada: true })}
+                    >
+                      <option value="">Sem unidade</option>
+                      {(unidadesPorEmpresa[editando.empresaId] || []).map((un) => <option key={un.id} value={un.id}>{un.nome}</option>)}
+                    </select>
+                    <div className="col-span-2 flex justify-end gap-2">
+                      <button type="button" className="btn-secondary !py-1 text-xs" onClick={() => setEditando(null)}>
+                        <X size={13} /> Cancelar
+                      </button>
+                      <button type="submit" className="btn-primary !py-1 text-xs">
+                        <Check size={13} /> Salvar
+                      </button>
+                    </div>
+                  </form>
+                </li>
+              ) : (
+                <li key={u.id} className="flex items-center justify-between text-sm bg-surface rounded-lg px-3 py-2 gap-2 flex-wrap">
+                  <div className="min-w-0">
+                    <span className="text-foreground">{u.nome}</span>
+                    <span className="text-foreground-subtle text-xs ml-2">{u.email}</span>
+                    {u.unidade_nome && <span className="text-foreground-subtle text-xs ml-2">· {u.empresa_nome} / {u.unidade_nome}</span>}
+                    {!u.ativo && <span className="text-red-400 text-xs ml-2">· inativo</span>}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <select
+                      className="input !py-1 !px-2 text-xs w-auto"
+                      value={u.perfil}
+                      disabled={u.id === usuarioLogado?.sub}
+                      onChange={(e) => alterarPerfil(u, e.target.value as Perfil)}
+                    >
+                      <option value="administrador">{ROTULO_PERFIL.administrador}</option>
+                      <option value="operador">{ROTULO_PERFIL.operador}</option>
+                      <option value="visualizador">{ROTULO_PERFIL.visualizador}</option>
+                    </select>
+                    <button
+                      onClick={() => iniciarEdicao(u)}
+                      className="text-foreground-subtle hover:text-brand"
+                      title="Editar usuário"
+                    >
+                      <Pencil size={14} />
                     </button>
-                  )}
-                </div>
-              </li>
-            ))}
+                    {u.id !== usuarioLogado?.sub && (
+                      <>
+                        <button
+                          onClick={() => alternarAtivo(u)}
+                          className="text-foreground-subtle hover:text-brand"
+                          title={u.ativo ? "Desativar usuário" : "Reativar usuário"}
+                        >
+                          <Power size={14} className={u.ativo ? "" : "text-red-400"} />
+                        </button>
+                        <button
+                          onClick={() => excluir(u)}
+                          className="text-foreground-subtle hover:text-red-400"
+                          title="Excluir usuário"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              )
+            )}
             {usuarios.length === 0 && <p className="text-xs text-foreground-subtle">Nenhum usuário cadastrado ainda.</p>}
           </ul>
 
